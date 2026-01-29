@@ -54,6 +54,13 @@ export async function GET(req: Request) {
      order by channel_no asc`,
     [camera.id]
   );
+  const channelRows = channelsResult.rows as Array<{
+    channel_no: number;
+    name: string | null;
+    zone: string | null;
+    features: string[] | null;
+    capabilities: unknown;
+  }>;
 
   return NextResponse.json({
     ok: true,
@@ -62,7 +69,7 @@ export async function GET(req: Request) {
     deviceType: camera.device_type as string | null,
     zone: camera.zone as string | null,
     updatedAt: camera.updated_at ? new Date(camera.updated_at).toISOString() : null,
-    channels: channelsResult.rows.map((row) => ({
+    channels: channelRows.map((row) => ({
       id: String(row.channel_no),
       name:
         typeof row.name === "string" && row.name.trim()
