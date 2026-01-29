@@ -13,6 +13,11 @@ type LoginPayload = {
 };
 
 export async function POST(req: Request) {
+  const requestUrl = new URL(req.url);
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  const isHttps = forwardedProto
+    ? forwardedProto.split(",")[0].trim() === "https"
+    : requestUrl.protocol === "https:";
   const payload = (await req.json().catch(() => ({}))) as LoginPayload;
   const username = typeof payload.username === "string" ? payload.username.trim() : "";
   const password = typeof payload.password === "string" ? payload.password : "";
@@ -44,7 +49,7 @@ export async function POST(req: Request) {
     value: token,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production" && isHttps,
     path: "/",
     maxAge: getSessionTtlSeconds()
   });
