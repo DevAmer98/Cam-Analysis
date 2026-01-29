@@ -9,9 +9,10 @@ export async function GET() {
      where zone is not null and trim(zone) <> ''
      order by zone asc`
   );
+  const zoneRows = result.rows as Array<{ zone: string }>;
 
   return NextResponse.json({
     ok: true,
-    zones: result.rows.map((row) => row.zone as string)
+    zones: zoneRows.map((row) => row.zone)
   });
 }

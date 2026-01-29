@@ -66,6 +66,16 @@ export async function GET(req: Request) {
      order by coalesce(c.name, c.ip) asc, ch.channel_no asc`,
     [zone]
   );
+  const channelRows = channelsResult.rows as Array<{
+    camera_id: string;
+    ip: string;
+    camera_name: string | null;
+    channel_no: number | string;
+    channel_name: string | null;
+    zone: string | null;
+    features: string[] | null;
+    capabilities: unknown;
+  }>;
 
   const peopleWhere = dayParam
     ? "ch.zone = $1 and p.day = $2::date"
@@ -212,7 +222,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     zone,
-    channels: channelsResult.rows.map((row) => {
+    channels: channelRows.map((row) => {
       const cameraId = row.camera_id as string;
       const channelNo = Number(row.channel_no);
       return {
