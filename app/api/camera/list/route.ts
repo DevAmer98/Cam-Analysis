@@ -15,7 +15,9 @@ async function getCameraColumns() {
      from information_schema.columns
      where table_schema = 'public' and table_name = 'cameras'`
   );
-  const columns = new Set(result.rows.map((row) => row.column_name));
+  const columns = new Set(
+    (result.rows as Array<{ column_name: string }>).map((row) => row.column_name)
+  );
   return {
     deviceType: columns.has("device_type"),
     zone: columns.has("zone"),
