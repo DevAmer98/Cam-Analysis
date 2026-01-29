@@ -52,10 +52,20 @@ export async function GET() {
      group by c.id
      order by coalesce(c.updated_at, c.created_at) desc`
   );
+  const cameraRows = result.rows as Array<{
+    id: string;
+    ip: string;
+    name: string | null;
+    device_type: string | null;
+    zone: string | null;
+    channels_total: number | string | null;
+    parent_camera_id: string | null;
+    updated_at: string | Date | null;
+  }>;
 
   return NextResponse.json({
     ok: true,
-    cameras: result.rows.map((row) => ({
+    cameras: cameraRows.map((row) => ({
       id: row.id as string,
       ip: row.ip as string,
       name: row.name as string | null,
