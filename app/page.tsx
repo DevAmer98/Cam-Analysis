@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { LineChart } from "../components/LineChart";
 import { PieChart } from "../components/PieChart";
+import { BarChart } from "../components/BarChart";
 import logoNoir from "../assets/image-removebg-preview (1).png";
 import logoFooter from "../assets/image-removebg-preview (2).png";
 
@@ -189,18 +190,16 @@ export default function Home() {
   const [selectedDay, setSelectedDay] = useState(() =>
     new Date().toLocaleDateString("en-CA")
   );
+  const [showAllDevicesStats, setShowAllDevicesStats] = useState(false);
+  const [showSelectedDeviceStats, setShowSelectedDeviceStats] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportScope, setReportScope] = useState<"all" | "zone">("all");
+  const [reportFormat, setReportFormat] = useState<"csv" | "xls">("csv");
+  const refreshInFlightRef = useRef(false);
   const [zoneChannels, setZoneChannels] = useState<ZoneChannel[]>([]);
   const [zoneLoading, setZoneLoading] = useState(false);
   const [zoneError, setZoneError] = useState<string | null>(null);
-
-  const [registerType, setRegisterType] = useState("camera");
-  const [registerName, setRegisterName] = useState("");
-  const [registerIp, setRegisterIp] = useState("");
-  const [registerUser, setRegisterUser] = useState("");
-  const [registerPass, setRegisterPass] = useState("");
-  const [registerStatus, setRegisterStatus] = useState<string | null>(null);
-  const [registerError, setRegisterError] = useState<string | null>(null);
-  const [registerLoading, setRegisterLoading] = useState(false);
 
   const [channelSaving, setChannelSaving] = useState<Record<string, boolean>>({});
   const [resettingChannels, setResettingChannels] = useState<Record<string, boolean>>({});
@@ -273,10 +272,77 @@ export default function Home() {
     );
   }, [zoneChannels]);
 
+  const zoneDemographics = useMemo(() => {
+    return zoneChannels.reduce(
+      (acc, channel) => {
+        acc.gender.male += channel.stats.gender.male;
+        acc.gender.female += channel.stats.gender.female;
+        acc.gender.unknown += channel.stats.gender.unknown;
+        acc.age.child += channel.ageBuckets.child;
+        acc.age.teen += channel.ageBuckets.teen;
+        acc.age.youngAdult += channel.ageBuckets.youngAdult;
+        acc.age.middleAge += channel.ageBuckets.middleAge;
+        acc.age.senior += channel.ageBuckets.senior;
+        acc.age.unknown += channel.ageBuckets.unknown;
+        return acc;
+      },
+      {
+        gender: { male: 0, female: 0, unknown: 0 },
+        age: { child: 0, teen: 0, youngAdult: 0, middleAge: 0, senior: 0, unknown: 0 }
+      }
+    );
+  }, [zoneChannels]);
+
+  const zoneGenderPie = useMemo(
+    () => [
+      { label: "Male", value: zoneDemographics.gender.male, color: "var(--accent-2)" },
+      { label: "Female", value: zoneDemographics.gender.female, color: "var(--danger)" },
+      { label: "Unknown", value: zoneDemographics.gender.unknown, color: "var(--accent)" }
+    ],
+    [zoneDemographics]
+  );
+
+  const zoneAgePie = useMemo(
+    () => [
+      { label: "Child", value: zoneDemographics.age.child, color: "var(--accent-2)" },
+      { label: "Teen", value: zoneDemographics.age.teen, color: "var(--signal)" },
+      { label: "Young", value: zoneDemographics.age.youngAdult, color: "var(--accent)" },
+      { label: "Middle", value: zoneDemographics.age.middleAge, color: "#8fa2b9" },
+      { label: "Senior", value: zoneDemographics.age.senior, color: "var(--danger)" },
+      { label: "Unknown", value: zoneDemographics.age.unknown, color: "#c2b7aa" }
+    ],
+    [zoneDemographics]
+  );
+
+  const zoneCapabilityMix = useMemo(() => {
+    let hasFace = false;
+    let hasPeopleCounting = false;
+    for (const channel of zoneChannels) {
+      const capabilityText =
+        typeof channel.capabilities === "string"
+          ? channel.capabilities
+          : channel.capabilities
+            ? JSON.stringify(channel.capabilities)
+            : "";
+      const isFace =
+        (typeof channel.cameraName === "string" && /(face|fece)/i.test(channel.cameraName)) ||
+        (typeof channel.channelName === "string" && /(face|fece)/i.test(channel.channelName)) ||
+        channel.features.some((feature) => /(face|fece)/i.test(feature)) ||
+        (capabilityText && /face/i.test(capabilityText)) ||
+        channel.stats.faceEvents > 0 ||
+        channel.stats.facesDetected > 0;
+      if (isFace) hasFace = true;
+      else hasPeopleCounting = true;
+    }
+    return { hasFace, hasPeopleCounting };
+  }, [zoneChannels]);
+
   const zoneDeviceCount = useMemo(() => {
     const ids = new Set(zoneChannels.map((channel) => channel.cameraId));
     return ids.size;
   }, [zoneChannels]);
+
+  const hasSingleZoneChannel = zoneChannels.length === 1;
 
   const genderPie = useMemo(() => {
     if (!overview) return null;
@@ -321,6 +387,30 @@ export default function Home() {
     const faces = timeline.map((stamp) => map.get(stamp)?.faces ?? 0);
     return { peopleIn, peopleOut, faces, timestamps: timeline };
   }, [series, timeline]);
+
+  const flowSummary = useMemo(() => {
+    const totalIn = chartSeries.peopleIn.reduce((sum, value) => sum + value, 0);
+    const totalOut = chartSeries.peopleOut.reduce((sum, value) => sum + value, 0);
+    let peakIndex = -1;
+    let peakValue = -1;
+    for (let i = 0; i < chartSeries.timestamps.length; i += 1) {
+      const value = (chartSeries.peopleIn[i] ?? 0) + (chartSeries.peopleOut[i] ?? 0);
+      if (value > peakValue) {
+        peakValue = value;
+        peakIndex = i;
+      }
+    }
+    const peakAt =
+      peakIndex >= 0 && chartSeries.timestamps[peakIndex]
+        ? new Date(chartSeries.timestamps[peakIndex]).toLocaleString([], {
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
+          })
+        : "—";
+    return { totalIn, totalOut, peakAt, peakValue: Math.max(0, peakValue) };
+  }, [chartSeries]);
 
   const formatEventTime = (value: string | null) => {
     if (!value) return "—";
@@ -652,67 +742,49 @@ export default function Home() {
     }
   };
 
-  const handleRegister = async () => {
-    setRegisterLoading(true);
-    setRegisterError(null);
-    setRegisterStatus(null);
-    try {
-      if (!registerIp.trim() || !registerType) {
-        throw new Error("Device IP and type are required.");
-      }
-      if (registerType === "camera" && (!registerUser || !registerPass)) {
-        throw new Error("Camera registration requires username and password.");
-      }
-
-      if (registerType === "camera") {
-        const res = await fetch("/api/camera/connect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ip: registerIp.trim(),
-            username: registerUser,
-            password: registerPass,
-            name: registerName,
-            deviceType: "camera"
-          })
-        });
-        const data = (await res.json()) as { ok: boolean; error?: string };
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || "Camera registration failed");
-        }
-      } else {
-        const res = await fetch("/api/device/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ip: registerIp.trim(),
-            name: registerName,
-            deviceType: "ai_box",
-            username: registerUser,
-            password: registerPass
-          })
-        });
-        const data = (await res.json()) as { ok: boolean; error?: string };
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || "AI box registration failed");
-        }
-      }
-
-      await loadDeviceList();
-      setSelectedIp(registerIp.trim());
-      setRegisterStatus("Device registered successfully.");
-    } catch (err) {
-      setRegisterError((err as Error).message ?? "Registration failed");
-    } finally {
-      setRegisterLoading(false);
-    }
-  };
-
   const handleLogout = async () => {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } finally {
       router.replace("/login");
+    }
+  };
+
+  const handleDownloadReport = async () => {
+    if (!isAdmin || reportLoading) return;
+    if (reportScope === "zone" && !selectedZone) {
+      setReportError("Select a zone first, or switch report scope to all devices.");
+      return;
+    }
+    setReportLoading(true);
+    setReportError(null);
+    try {
+      const params = new URLSearchParams();
+      if (selectedDay) params.set("day", selectedDay);
+      params.set("scope", reportScope);
+      params.set("format", reportFormat);
+      if (reportScope === "zone" && selectedZone) params.set("zone", selectedZone);
+      const res = await fetch(`/api/report/download?${params.toString()}`);
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || "Failed to generate report.");
+      }
+      const blob = await res.blob();
+      const dispo = res.headers.get("content-disposition") || "";
+      const matched = dispo.match(/filename=\"?([^\";]+)\"?/i);
+      const filename =
+        matched?.[1] || `camera-report-${selectedDay || "today"}.${reportFormat}`;
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      setReportError((err as Error).message || "Failed to download report.");
+    } finally {
+      setReportLoading(false);
     }
   };
 
@@ -767,6 +839,29 @@ export default function Home() {
     loadOverview();
   }, [selectedDay]);
 
+  useEffect(() => {
+    if (authLoading) return;
+    const tick = async () => {
+      if (refreshInFlightRef.current) return;
+      refreshInFlightRef.current = true;
+      try {
+        await Promise.all([
+          loadDeviceList(),
+          loadZoneList(),
+          loadOverview(),
+          selectedIp ? loadDeviceContext(selectedIp) : Promise.resolve(),
+          selectedZone ? loadZoneChannels(selectedZone) : Promise.resolve()
+        ]);
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    };
+    const interval = setInterval(() => {
+      void tick();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [authLoading, selectedIp, selectedZone, selectedDay, seriesHours]);
+
   if (authLoading) {
     return (
       <div className="loading-screen">
@@ -787,6 +882,33 @@ export default function Home() {
           </div>
         </div>
         <div className="topbar-actions">
+          {isAdmin && (
+            <>
+              <select
+                className="pill small-pill ghost"
+                value={reportScope}
+                onChange={(event) => setReportScope(event.target.value as "all" | "zone")}
+              >
+                <option value="all">All devices report</option>
+                <option value="zone">Selected zone report</option>
+              </select>
+              <select
+                className="pill small-pill ghost"
+                value={reportFormat}
+                onChange={(event) => setReportFormat(event.target.value as "csv" | "xls")}
+              >
+                <option value="csv">CSV</option>
+                <option value="xls">Excel (.xls)</option>
+              </select>
+              <button
+                className="pill small-pill ghost"
+                onClick={handleDownloadReport}
+                disabled={reportLoading}
+              >
+                {reportLoading ? "Generating report..." : "Download report"}
+              </button>
+            </>
+          )}
           <div className="pill small-pill ghost">
             {session?.username} ({session?.role})
           </div>
@@ -795,6 +917,7 @@ export default function Home() {
           </button>
         </div>
       </header>
+      {reportError && <div className="pill small-pill danger">{reportError}</div>}
 
       <section className="hero">
         <div className="hero-card">
@@ -802,7 +925,7 @@ export default function Home() {
             <span className="eyebrow">Device Overview</span>
             <h1>Registered devices by zone</h1>
             <p className="small">
-              Connect AI boxes and cameras, then monitor people flow and occupancy from one view.
+              Monitor people flow and occupancy across all devices from one view.
             </p>
           </div>
           <div className="hero-stats">
@@ -826,70 +949,77 @@ export default function Home() {
         </div>
         <div className="hero-card">
           <div className="header-min">
-            <h3>Register device</h3>
-            <span className="pill small-pill ghost">Admin only</span>
-          </div>
-          <div className="form-grid">
-            <label>
-              Type
-              <select
-                value={registerType}
-                onChange={(event) => setRegisterType(event.target.value)}
-                disabled={!isAdmin}
+            <div>
+              <span className="eyebrow">Zone Focus</span>
+              <h3>{selectedZone || "Select a zone"}</h3>
+            </div>
+            <div className="actions">
+              <input
+                type="date"
+                value={selectedDay}
+                onChange={(event) => setSelectedDay(event.target.value)}
+              />
+              <button
+                className="pill small-pill ghost"
+                onClick={() => setSelectedDay(new Date().toLocaleDateString("en-CA"))}
               >
-                <option value="camera">Camera</option>
-                <option value="ai_box">AI Box</option>
+                Today
+              </button>
+              <select
+                value={selectedZone}
+                onChange={(event) => setSelectedZone(event.target.value)}
+              >
+                <option value="">Select zone</option>
+                {zoneList.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
               </select>
-            </label>
-            <label>
-              Device name
-              <input
-                value={registerName}
-                onChange={(event) => setRegisterName(event.target.value)}
-                placeholder="Entrance Cam 01"
-                disabled={!isAdmin}
-              />
-            </label>
-            <label>
-              IP address
-              <input
-                value={registerIp}
-                onChange={(event) => setRegisterIp(event.target.value)}
-                placeholder="192.168.1.45"
-                disabled={!isAdmin}
-              />
-            </label>
-            <label>
-              Username
-              <input
-                value={registerUser}
-                onChange={(event) => setRegisterUser(event.target.value)}
-                placeholder="admin"
-                disabled={!isAdmin}
-              />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={registerPass}
-                onChange={(event) => setRegisterPass(event.target.value)}
-                placeholder="••••••••"
-                disabled={!isAdmin}
-              />
-            </label>
+              <button
+                className="pill small-pill ghost"
+                onClick={() => selectedZone && loadZoneChannels(selectedZone)}
+                disabled={!selectedZone || zoneLoading}
+              >
+                Refresh zone
+              </button>
+            </div>
           </div>
-          <div className="actions">
-            <button
-              className="btn-primary"
-              onClick={handleRegister}
-              disabled={registerLoading || !isAdmin}
-            >
-              {registerLoading ? "Registering..." : "Register device"}
-            </button>
-            {registerStatus && <span className="pill small-pill">{registerStatus}</span>}
-            {registerError && <span className="pill small-pill danger">{registerError}</span>}
+          <div className="hero-stats">
+            {zoneCapabilityMix.hasPeopleCounting && (
+              <>
+                <div className="stat-chip">
+                  <span>Inside now</span>
+                  <strong>{zoneTotals.occupancy}</strong>
+                </div>
+                <div className="stat-chip">
+                  <span>Entered</span>
+                  <strong>{zoneTotals.peopleIn}</strong>
+                </div>
+                <div className="stat-chip">
+                  <span>Exited</span>
+                  <strong>{zoneTotals.peopleOut}</strong>
+                </div>
+              </>
+            )}
+            {zoneCapabilityMix.hasFace && (
+              <>
+                <div className="stat-chip">
+                  <span>Face events</span>
+                  <strong>{zoneTotals.faceEvents}</strong>
+                </div>
+                <div className="stat-chip">
+                  <span>Faces detected</span>
+                  <strong>{zoneTotals.facesDetected}</strong>
+                </div>
+              </>
+            )}
+            <div className="stat-chip">
+              <span>Devices</span>
+              <strong>{zoneDeviceCount}</strong>
+            </div>
           </div>
+          {zoneError && <div className="pill small-pill danger">{zoneError}</div>}
         </div>
       </section>
 
@@ -927,7 +1057,238 @@ export default function Home() {
         </aside>
 
         <div className="stack">
-          {overview && genderPie && agePie && (
+          <section className="panel zone-section">
+            <div className="header-min">
+              <div>
+                <h3>Zone analytics</h3>
+                <span className="small">
+                  {selectedZone
+                    ? `${selectedZone} channels and demographic details`
+                    : "Choose a zone above to load analytics"}
+                </span>
+              </div>
+            </div>
+
+            {selectedZone && (
+              <>
+                <div className="device-summary">
+                  <div className="summary-card">
+                    <h4>Devices</h4>
+                    <div className="value">{zoneDeviceCount}</div>
+                    <span className="small">In {selectedZone}</span>
+                  </div>
+                  {zoneCapabilityMix.hasPeopleCounting && (
+                    <div className="summary-card">
+                      <h4>People inside</h4>
+                      <div className="value">{zoneTotals.occupancy}</div>
+                      <span className="small">Current net occupancy</span>
+                    </div>
+                  )}
+                  {zoneCapabilityMix.hasPeopleCounting && (
+                    <div className="summary-card">
+                      <h4>People entered</h4>
+                      <div className="value">{zoneTotals.peopleIn}</div>
+                      <span className="small">Total in selected day</span>
+                    </div>
+                  )}
+                  {zoneCapabilityMix.hasPeopleCounting && (
+                    <div className="summary-card">
+                      <h4>People exited</h4>
+                      <div className="value">{zoneTotals.peopleOut}</div>
+                      <span className="small">Total in selected day</span>
+                    </div>
+                  )}
+                  {zoneCapabilityMix.hasFace && (
+                    <div className="summary-card">
+                      <h4>Face events</h4>
+                      <div className="value">{zoneTotals.faceEvents}</div>
+                      <span className="small">Total in selected day</span>
+                    </div>
+                  )}
+                </div>
+                {hasSingleZoneChannel ? (
+                  <div className="chart-grid">
+                    {zoneCapabilityMix.hasPeopleCounting && (
+                      <BarChart
+                        title="Zone flow"
+                        subtitle="Entered / Exited / Inside"
+                        bars={[
+                          { label: "Entered", value: zoneTotals.peopleIn, color: "var(--accent)" },
+                          { label: "Exited", value: zoneTotals.peopleOut, color: "var(--signal)" },
+                          { label: "Inside", value: zoneTotals.occupancy, color: "var(--accent-2)" }
+                        ]}
+                      />
+                    )}
+                    {zoneCapabilityMix.hasFace && (
+                      <BarChart
+                        title="Zone gender mix"
+                        subtitle="All zone channels"
+                        bars={[
+                          {
+                            label: "Male",
+                            value: zoneDemographics.gender.male,
+                            color: "var(--accent-2)"
+                          },
+                          {
+                            label: "Female",
+                            value: zoneDemographics.gender.female,
+                            color: "var(--danger)"
+                          },
+                          {
+                            label: "Unknown",
+                            value: zoneDemographics.gender.unknown,
+                            color: "var(--accent)"
+                          }
+                        ]}
+                      />
+                    )}
+                    {zoneCapabilityMix.hasFace && (
+                      <BarChart
+                        title="Zone age range"
+                        subtitle="All zone channels"
+                        bars={[
+                          { label: "Child", value: zoneDemographics.age.child, color: "var(--accent-2)" },
+                          { label: "Teen", value: zoneDemographics.age.teen, color: "var(--signal)" },
+                          {
+                            label: "Young",
+                            value: zoneDemographics.age.youngAdult,
+                            color: "var(--accent)"
+                          },
+                          {
+                            label: "Middle",
+                            value: zoneDemographics.age.middleAge,
+                            color: "#8fa2b9"
+                          },
+                          { label: "Senior", value: zoneDemographics.age.senior, color: "var(--danger)" },
+                          { label: "Unknown", value: zoneDemographics.age.unknown, color: "#c2b7aa" }
+                        ]}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div className="pie-grid">
+                    {zoneCapabilityMix.hasFace && (
+                      <PieChart
+                        title="Zone gender mix"
+                        subtitle="All zone channels"
+                        slices={zoneGenderPie}
+                      />
+                    )}
+                    {zoneCapabilityMix.hasFace && (
+                      <PieChart title="Zone age range" subtitle="All zone channels" slices={zoneAgePie} />
+                    )}
+                    {zoneCapabilityMix.hasPeopleCounting && (
+                      <PieChart
+                        title="Zone flow"
+                        subtitle="Entered / Exited / Inside"
+                        slices={[
+                          { label: "Entered", value: zoneTotals.peopleIn, color: "var(--accent)" },
+                          { label: "Exited", value: zoneTotals.peopleOut, color: "var(--signal)" },
+                          { label: "Inside", value: zoneTotals.occupancy, color: "var(--accent-2)" }
+                        ]}
+                      />
+                    )}
+                  </div>
+                )}
+                {!zoneCapabilityMix.hasFace && (
+                  <div className="small">
+                    Face charts are hidden for people-counting zones/channels.
+                  </div>
+                )}
+                {zoneChannels.length === 0 && !zoneLoading && (
+                  <div className="empty-state">
+                    <div className="orb small" />
+                    <div>
+                      <div className="camera-name">No channels found</div>
+                      <p className="small">
+                        This zone has no mapped channels for the selected date.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {zoneChannels.length > 1 && <div className="camera-grid">
+                  {zoneChannels.map((channel) => {
+                    const isFace = isFaceDeviceName(channel.cameraName) || isFaceChannel(
+                      channel.channelName,
+                      channel.features,
+                      channel.capabilities,
+                      channel.stats
+                    );
+                    return (
+                      <div key={`${channel.cameraId}-${channel.channelId}`} className="camera-card">
+                        <div className="camera-header">
+                          <div>
+                            <div className="camera-name">{channel.channelName}</div>
+                            <div className="small">
+                              {channel.cameraName || channel.cameraIp} · Channel {channel.channelId}
+                            </div>
+                          </div>
+                          <div className="device-meta">
+                            <span className="pill small-pill ghost">{selectedZone}</span>
+                            {!isFace && !hasSingleZoneChannel && (
+                              <span className="small">
+                                In {channel.stats.peopleIn} · Out {channel.stats.peopleOut}
+                              </span>
+                            )}
+                            {isFace && !hasSingleZoneChannel && (
+                              <span className="small">Faces {channel.stats.facesDetected}</span>
+                            )}
+                          </div>
+                        </div>
+                        {!hasSingleZoneChannel && (
+                          <div className="pie-grid">
+                            {isFace ? (
+                              <>
+                                <PieChart
+                                  title="Gender mix"
+                                  subtitle="Attributes"
+                                  slices={genderSlicesFor(channel.stats)}
+                                />
+                                <PieChart
+                                  title="Age range"
+                                  subtitle="Attributes"
+                                  slices={ageSlicesFromBuckets(channel.ageBuckets)}
+                                />
+                              </>
+                            ) : (
+                              <PieChart
+                                title="People flow"
+                                subtitle="In / Out / Occupancy"
+                                slices={flowSlicesFor(channel.stats)}
+                              />
+                            )}
+                          </div>
+                        )}
+                        <div className="small">
+                          Last event: {formatEventTime(channel.stats.lastEventAt)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>}
+              </>
+            )}
+            {!selectedZone && (
+              <div className="empty-state">
+                <div className="orb small" />
+                <div>
+                  <div className="camera-name">No zone selected</div>
+                  <p className="small">Pick a zone from the top selector to view its analytics.</p>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <div className="actions">
+            <button
+              className="pill small-pill ghost"
+              onClick={() => setShowAllDevicesStats((prev) => !prev)}
+            >
+              {showAllDevicesStats ? "Hide all devices stats" : "Show all devices stats"}
+            </button>
+          </div>
+
+          {showAllDevicesStats && overview && genderPie && agePie && (
             <section className="panel">
               <div className="header-min">
                 <h3>All devices stats</h3>
@@ -964,6 +1325,18 @@ export default function Home() {
             </section>
           )}
 
+          <div className="actions">
+            <button
+              className="pill small-pill ghost"
+              onClick={() => setShowSelectedDeviceStats((prev) => !prev)}
+            >
+              {showSelectedDeviceStats
+                ? "Hide selected device stats"
+                : "Show selected device stats"}
+            </button>
+          </div>
+
+          {showSelectedDeviceStats && (
           <section className="panel">
             <div className="header-min">
               <div>
@@ -1025,11 +1398,17 @@ export default function Home() {
               </div>
             )}
           </section>
+          )}
 
-          {!isFaceDeviceName(deviceInfo?.name) && (
-            <section className="panel">
+          {showSelectedDeviceStats && !isFaceDeviceName(deviceInfo?.name) && (
+            <section className="panel flow-section">
               <div className="header-min">
-                <h3>Flow timelines</h3>
+                <div>
+                  <h3>Flow timelines</h3>
+                  <span className="small">
+                    Selected date {selectedDay} · Hourly people counts for this device
+                  </span>
+                </div>
                 <div className="actions">
                   <button
                     className={`pill small-pill ghost ${seriesHours === 24 ? "active" : ""}`}
@@ -1051,10 +1430,27 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+              <div className="device-summary">
+                <div className="summary-card">
+                  <h4>Total in (range)</h4>
+                  <div className="value">{flowSummary.totalIn}</div>
+                  <span className="small">Selected {seriesHours}h window</span>
+                </div>
+                <div className="summary-card">
+                  <h4>Total out (range)</h4>
+                  <div className="value">{flowSummary.totalOut}</div>
+                  <span className="small">Selected {seriesHours}h window</span>
+                </div>
+                <div className="summary-card">
+                  <h4>Peak hour</h4>
+                  <div className="value">{flowSummary.peakValue}</div>
+                  <span className="small">In + Out at {flowSummary.peakAt}</span>
+                </div>
+              </div>
               <div className="chart-grid">
                 <LineChart
-                  title="People flow"
-                  subtitle="Entries vs exits"
+                  title="People flow by hour"
+                  subtitle="Yellow = entered, red = exited"
                   timestamps={chartSeries.timestamps}
                   series={[
                     { label: "In", color: "var(--accent)", data: chartSeries.peopleIn },
@@ -1066,7 +1462,7 @@ export default function Home() {
           )}
 
 
-          {deviceInfo && (
+          {showSelectedDeviceStats && deviceInfo && (
             <section className="panel">
               <div className="header-min">
                 <h3>Channel analytics</h3>
@@ -1091,34 +1487,9 @@ export default function Home() {
                     <div key={channel.id} className="camera-card">
                       <div className="camera-header">
                         <div>
-                          <input
-                            className="camera-name-input"
-                            value={channel.name ?? ""}
-                            placeholder={`Channel ${channel.id}`}
-                            disabled={!isAdmin}
-                            title={!isAdmin ? "Admin only" : undefined}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setDeviceInfo((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  channels: prev.channels.map((entry) =>
-                                    entry.id === channel.id
-                                      ? { ...entry, name: nextValue }
-                                      : entry
-                                  )
-                                };
-                              });
-                            }}
-                            onBlur={() => saveChannelName(channel.id, channel.name ?? "")}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.currentTarget.blur();
-                              }
-                            }}
-                          />
-                          <div className="small">Channel {channel.id}</div>
+                          <div className="camera-name">
+                            {channel.name?.trim() ? channel.name : `Channel ${channel.id}`}
+                          </div>
                           <input
                             className="camera-name-input channel-zone-input"
                             value={channel.zone ?? ""}
@@ -1147,18 +1518,21 @@ export default function Home() {
                             }}
                           />
                         </div>
-                        {isAdmin && hasPeopleCount && (
-                          <button
-                            className="pill small-pill ghost"
-                            onClick={() => resetChannelCounters(channel.id)}
-                            disabled={resettingChannels[channel.id]}
-                          >
-                            {resettingChannels[channel.id] ? "Resetting..." : "Reset count"}
-                          </button>
-                        )}
-                        {channelSaving[channel.id] && (
-                          <span className="pill small-pill ghost">Saving</span>
-                        )}
+                        <div className="device-meta">
+                          <span className="pill small-pill ghost">Channel {channel.id}</span>
+                          {isAdmin && hasPeopleCount && (
+                            <button
+                              className="pill small-pill ghost"
+                              onClick={() => resetChannelCounters(channel.id)}
+                              disabled={resettingChannels[channel.id]}
+                            >
+                              {resettingChannels[channel.id] ? "Resetting..." : "Reset count"}
+                            </button>
+                          )}
+                          {channelSaving[channel.id] && (
+                            <span className="pill small-pill ghost">Saving</span>
+                          )}
+                        </div>
                       </div>
                       <div className="mini-grid">
                         {isFace ? (
@@ -1173,13 +1547,6 @@ export default function Home() {
                             <div className="mini">
                               <h5>Avg age</h5>
                               <div className="value">{formatAvgAge(channel.stats.age.avg)}</div>
-                            </div>
-                            <div className="mini">
-                              <h5>Glasses</h5>
-                              <div className="value">
-                                Yes {channel.stats.glasses.yes} · No {channel.stats.glasses.no} · U{" "}
-                                {channel.stats.glasses.unknown}
-                              </div>
                             </div>
                           </>
                         ) : (
@@ -1209,110 +1576,7 @@ export default function Home() {
             </section>
           )}
 
-          <section className="panel">
-            <div className="header-min">
-              <div>
-                <h3>Zone channels</h3>
-                <span className="small">Select a zone to view channels across devices</span>
-              </div>
-              <div className="actions">
-                <select
-                  value={selectedZone}
-                  onChange={(event) => setSelectedZone(event.target.value)}
-                >
-                  <option value="">Select zone</option>
-                  {zoneList.map((zone) => (
-                    <option key={zone} value={zone}>
-                      {zone}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="pill small-pill ghost"
-                  onClick={() => selectedZone && loadZoneChannels(selectedZone)}
-                  disabled={!selectedZone || zoneLoading}
-                >
-                  {zoneLoading ? "Loading..." : "Refresh zone"}
-                </button>
-              </div>
-            </div>
 
-            {selectedZone && (
-              <>
-                <div className="device-summary">
-                  <div className="summary-card">
-                    <h4>Devices</h4>
-                    <div className="value">{zoneDeviceCount}</div>
-                    <span className="small">In {selectedZone}</span>
-                  </div>
-                  <div className="summary-card">
-                    <h4>People in</h4>
-                    <div className="value">{zoneTotals.peopleIn}</div>
-                    <span className="small">All channels</span>
-                  </div>
-                  <div className="summary-card">
-                    <h4>People out</h4>
-                    <div className="value">{zoneTotals.peopleOut}</div>
-                    <span className="small">All channels</span>
-                  </div>
-                  <div className="summary-card">
-                    <h4>Occupancy</h4>
-                    <div className="value">{zoneTotals.occupancy}</div>
-                    <span className="small">Net in zone</span>
-                  </div>
-                </div>
-                {zoneError && <div className="pill small-pill danger">{zoneError}</div>}
-                <div className="camera-grid">
-                  {zoneChannels.map((channel) => {
-                    const isFace = isFaceDeviceName(channel.cameraName) || isFaceChannel(
-                      channel.channelName,
-                      channel.features,
-                      channel.capabilities,
-                      channel.stats
-                    );
-                    return (
-                      <div key={`${channel.cameraId}-${channel.channelId}`} className="camera-card">
-                        <div className="camera-header">
-                          <div>
-                            <div className="camera-name">{channel.channelName}</div>
-                            <div className="small">
-                              {channel.cameraName || channel.cameraIp} · Channel {channel.channelId}
-                            </div>
-                          </div>
-                          <span className="pill small-pill ghost">{selectedZone}</span>
-                        </div>
-                        <div className="pie-grid">
-                          {isFace ? (
-                            <>
-                              <PieChart
-                                title="Gender mix"
-                                subtitle="Attributes"
-                                slices={genderSlicesFor(channel.stats)}
-                              />
-                              <PieChart
-                                title="Age range"
-                                subtitle="Attributes"
-                                slices={ageSlicesFromBuckets(channel.ageBuckets)}
-                              />
-                            </>
-                          ) : (
-                            <PieChart
-                              title="People flow"
-                              subtitle="In / Out / Occupancy"
-                              slices={flowSlicesFor(channel.stats)}
-                            />
-                          )}
-                        </div>
-                        <div className="small">
-                          Last event: {formatEventTime(channel.stats.lastEventAt)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </section>
         </div>
       </section>
 

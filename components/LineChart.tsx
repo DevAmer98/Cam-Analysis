@@ -27,15 +27,25 @@ function buildPath(data: number[], width: number, height: number) {
 export function LineChart({ title, subtitle, timestamps, series }: Props) {
   const width = 320;
   const height = 120;
-  const labelStart = timestamps[0]
-    ? new Date(timestamps[0]).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : "—";
-  const labelEnd = timestamps[timestamps.length - 1]
-    ? new Date(timestamps[timestamps.length - 1]).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit"
-      })
-    : "—";
+  const startTs = timestamps[0] ? new Date(timestamps[0]) : null;
+  const endTs = timestamps[timestamps.length - 1] ? new Date(timestamps[timestamps.length - 1]) : null;
+  const midTs = timestamps[Math.floor(timestamps.length / 2)]
+    ? new Date(timestamps[Math.floor(timestamps.length / 2)])
+    : null;
+  const showDate = !!(startTs && endTs && endTs.getTime() - startTs.getTime() >= 24 * 60 * 60 * 1000);
+  const formatLabel = (value: Date | null) => {
+    if (!value) return "—";
+    return value.toLocaleString([], {
+      month: showDate ? "short" : undefined,
+      day: showDate ? "2-digit" : undefined,
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  };
+  const labelStart = formatLabel(startTs);
+  const labelMid = formatLabel(midTs);
+  const labelEnd = formatLabel(endTs);
+  const maxValue = Math.max(0, ...series.flatMap((line) => line.data));
 
   return (
     <div className="chart-card">
@@ -51,6 +61,7 @@ export function LineChart({ title, subtitle, timestamps, series }: Props) {
               {line.label}
             </span>
           ))}
+          <span className="legend-chip">Max: {maxValue}</span>
         </div>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="chart-svg" role="img">
@@ -68,8 +79,9 @@ export function LineChart({ title, subtitle, timestamps, series }: Props) {
         ))}
       </svg>
       <div className="chart-footer small">
-        <span>{labelStart}</span>
-        <span>{labelEnd}</span>
+        <span>Start: {labelStart}</span>
+        <span>Mid: {labelMid}</span>
+        <span>End: {labelEnd}</span>
       </div>
     </div>
   );
