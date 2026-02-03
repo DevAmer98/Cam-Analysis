@@ -1,11 +1,12 @@
 {
   "/not-found": "app/not-found.js",
-  "/api/camera/detail/route": "app/api/camera/detail/route.js",
-  "/api/camera/stats/route": "app/api/camera/stats/route.js",
+  "/api/overview/route": "app/api/overview/route.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/page": "app/page.js",
+  "/api/zone/channels/route": "app/api/zone/channels/route.js",
   "/api/camera/list/route": "app/api/camera/list/route.js",
   "/api/zone/list/route": "app/api/zone/list/route.js",
-  "/api/camera/timeseries/route": "app/api/camera/timeseries/route.js",
-  "/page": "app/page.js",
-  "/api/overview/route": "app/api/overview/route.js",
-  "/api/zone/channels/route": "app/api/zone/channels/route.js"
+  "/api/camera/detail/route": "app/api/camera/detail/route.js",
+  "/api/camera/stats/route": "app/api/camera/stats/route.js",
+  "/api/camera/timeseries/route": "app/api/camera/timeseries/route.js"
 }
