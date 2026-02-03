@@ -366,16 +366,22 @@ export default function Home() {
   }, [overview]);
 
   const timeline = useMemo(() => {
-    const now = new Date();
     const hours = Math.max(1, seriesHours);
+    const selectedDate = selectedDay
+      ? new Date(`${selectedDay}T00:00:00.000Z`)
+      : null;
+    const anchorTime =
+      selectedDate && !Number.isNaN(selectedDate.getTime())
+        ? selectedDate.getTime() + 23 * 60 * 60 * 1000
+        : Date.now();
     const points: string[] = [];
     for (let i = hours - 1; i >= 0; i -= 1) {
-      const date = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const date = new Date(anchorTime - i * 60 * 60 * 1000);
       date.setMinutes(0, 0, 0);
       points.push(date.toISOString());
     }
     return points;
-  }, [seriesHours]);
+  }, [seriesHours, selectedDay]);
 
   const chartSeries = useMemo(() => {
     const map = new Map<string, TimeseriesPoint>();

@@ -27,9 +27,9 @@ export async function GET(req: Request) {
 
   const rangeHours = Number.isFinite(hours) && hours > 0 ? Math.min(hours, 168) : 24;
   const peopleWhere = dayParam
-    ? "camera_id = $1 and bucket_start >= $2::date and bucket_start < $2::date + interval '1 day'"
+    ? "camera_id = $1 and bucket_start >= $2::date + interval '1 day' - ($3::int * interval '1 hour') and bucket_start < $2::date + interval '1 day'"
     : "camera_id = $1 and bucket_start >= now() - ($2::int * interval '1 hour')";
-  const peopleParams = dayParam ? [cameraId, dayParam] : [cameraId, String(rangeHours)];
+  const peopleParams = dayParam ? [cameraId, dayParam, rangeHours] : [cameraId, rangeHours];
 
   const peopleRows = await db.query(
     `select bucket_start as bucket,
@@ -43,9 +43,9 @@ export async function GET(req: Request) {
   );
 
   const faceWhere = dayParam
-    ? "camera_id = $1 and bucket_start >= $2::date and bucket_start < $2::date + interval '1 day'"
+    ? "camera_id = $1 and bucket_start >= $2::date + interval '1 day' - ($3::int * interval '1 hour') and bucket_start < $2::date + interval '1 day'"
     : "camera_id = $1 and bucket_start >= now() - ($2::int * interval '1 hour')";
-  const faceParams = dayParam ? [cameraId, dayParam] : [cameraId, String(rangeHours)];
+  const faceParams = dayParam ? [cameraId, dayParam, rangeHours] : [cameraId, rangeHours];
   const faceRows = await db.query(
     `select bucket_start as bucket,
             coalesce(sum(total), 0) as faces
