@@ -156,6 +156,12 @@ type ZoneChannelsResponse = {
   error?: string;
 };
 
+type ChannelTimeseriesResponse = {
+  ok: boolean;
+  series: TimeseriesPoint[];
+  error?: string;
+};
+
 type SessionUser = {
   username: string;
   role: "admin" | "user";
@@ -191,6 +197,12 @@ export default function Home() {
   const [selectedDay, setSelectedDay] = useState(() =>
     new Date().toLocaleDateString("en-CA")
   );
+  const [userFlowFrom, setUserFlowFrom] = useState(() =>
+    new Date().toLocaleDateString("en-CA")
+  );
+  const [userFlowTo, setUserFlowTo] = useState(() =>
+    new Date().toLocaleDateString("en-CA")
+  );
   const [showAllDevicesStats, setShowAllDevicesStats] = useState(false);
   const [showSelectedDeviceStats, setShowSelectedDeviceStats] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
@@ -201,6 +213,13 @@ export default function Home() {
   const [zoneChannels, setZoneChannels] = useState<ZoneChannel[]>([]);
   const [zoneLoading, setZoneLoading] = useState(false);
   const [zoneError, setZoneError] = useState<string | null>(null);
+  const [zoneSeriesByChannel, setZoneSeriesByChannel] = useState<
+    Record<string, TimeseriesPoint[]>
+  >({});
+
+  const [zoneDrafts, setZoneDrafts] = useState<Record<string, string>>({});
+  const zoneDraftsRef = useRef<Record<string, string>>({});
+  const zoneSaveTimers = useRef<Record<string, number>>({});
 
   const [channelSaving, setChannelSaving] = useState<Record<string, boolean>>({});
   const [resettingChannels, setResettingChannels] = useState<Record<string, boolean>>({});
@@ -209,6 +228,7 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const isAdmin = session?.role === "admin";
+  const isUser = session?.role === "user";
 
   const rootDevices = useMemo(
     () => deviceList.filter((device) => !device.parentCameraId),
@@ -343,6 +363,8 @@ export default function Home() {
     return ids.size;
   }, [zoneChannels]);
 
+  const zoneChannelCount = zoneChannels.length;
+
   const hasSingleZoneChannel = zoneChannels.length === 1;
 
   const genderPie = useMemo(() => {
@@ -419,6 +441,18 @@ export default function Home() {
     return { totalIn, totalOut, peakAt, peakValue: Math.max(0, peakValue) };
   }, [chartSeries]);
 
+  const percent = (value: number, total: number) => {
+    if (!total) return 0;
+    return Math.round((value / total) * 100);
+  };
+
+  const formatHourLabel = (value?: string | null) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
   const formatEventTime = (value: string | null) => {
     if (!value) return "—";
     const date = new Date(value);
@@ -432,6 +466,74 @@ export default function Home() {
       minute: "2-digit"
     }).format(date);
   };
+
+  const clampUserFlowRange = (from: string, to: string) => {
+    const start = new Date(`${from}T00:00:00.000Z`);
+    const end = new Date(`${to}T00:00:00.000Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return { from, to };
+    }
+    let safeFrom = start;
+    let safeTo = end;
+    if (safeTo.getTime() < safeFrom.getTime()) {
+      safeTo = safeFrom;
+    }
+    const maxDays = 7;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const diffDays = Math.floor((safeTo.getTime() - safeFrom.getTime()) / dayMs) + 1;
+    if (diffDays > maxDays) {
+      safeFrom = new Date(safeTo.getTime() - (maxDays - 1) * dayMs);
+    }
+    return {
+      from: safeFrom.toLocaleDateString("en-CA"),
+      to: safeTo.toLocaleDateString("en-CA")
+    };
+  };
+
+  const setFlowRangeForHours = (hours: number, anchor?: string) => {
+    const toValue = anchor ?? userFlowTo;
+    const base = new Date(`${toValue}T00:00:00.000Z`);
+    if (Number.isNaN(base.getTime())) return;
+    const days = Math.max(1, Math.round(hours / 24));
+    const dayMs = 24 * 60 * 60 * 1000;
+    const fromDate = new Date(base.getTime() - (days - 1) * dayMs);
+    const next = clampUserFlowRange(
+      fromDate.toLocaleDateString("en-CA"),
+      base.toLocaleDateString("en-CA")
+    );
+    setUserFlowFrom(next.from);
+    setUserFlowTo(next.to);
+  };
+
+  const handleUserFlowFromChange = (value: string) => {
+    const next = clampUserFlowRange(value, userFlowTo);
+    setUserFlowFrom(next.from);
+    setUserFlowTo(next.to);
+  };
+
+  const handleUserFlowToChange = (value: string) => {
+    const next = clampUserFlowRange(userFlowFrom, value);
+    setUserFlowFrom(next.from);
+    setUserFlowTo(next.to);
+  };
+
+  const userFlowTimeline = useMemo(() => {
+    if (!userFlowFrom || !userFlowTo) return [];
+    const start = new Date(`${userFlowFrom}T00:00:00.000Z`);
+    const end = new Date(`${userFlowTo}T00:00:00.000Z`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+    const dayMs = 24 * 60 * 60 * 1000;
+    const endExclusive = new Date(end.getTime() + dayMs);
+    const totalSteps = Math.min(
+      Math.max(0, Math.ceil((endExclusive.getTime() - start.getTime()) / (60 * 60 * 1000))),
+      7 * 24
+    );
+    const points: string[] = [];
+    for (let i = 0; i < totalSteps; i += 1) {
+      points.push(new Date(start.getTime() + i * 60 * 60 * 1000).toISOString());
+    }
+    return points;
+  }, [userFlowFrom, userFlowTo]);
 
   const getAgeBucket = (value: number | null) => {
     if (value === null || Number.isNaN(value)) return "Unknown";
@@ -470,6 +572,25 @@ export default function Home() {
     );
   };
 
+  const isPeopleCountingChannel = (channel: ZoneChannel) => {
+    const isFace =
+      isFaceDeviceName(channel.cameraName) ||
+      isFaceChannel(channel.channelName, channel.features, channel.capabilities, channel.stats);
+    const capabilityText =
+      typeof channel.capabilities === "string"
+        ? channel.capabilities
+        : channel.capabilities
+          ? JSON.stringify(channel.capabilities)
+          : "";
+    const hasPeopleFeature = channel.features.some((feature) =>
+      feature.toLowerCase().includes("people")
+    );
+    const hasPeopleSignal = channel.stats.peopleIn > 0 || channel.stats.peopleOut > 0;
+    const hasPeopleCapability = capabilityText && /(people|count|line)/i.test(capabilityText);
+    return !isFace && (hasPeopleFeature || hasPeopleSignal || hasPeopleCapability);
+  };
+
+
   const genderSlicesFor = (stats: ChannelStats) => [
     { label: "Male", value: stats.gender.male, color: "var(--accent-2)" },
     { label: "Female", value: stats.gender.female, color: "var(--danger)" },
@@ -502,13 +623,16 @@ export default function Home() {
     { label: "Unknown", value: buckets.unknown, color: "#c2b7aa" }
   ];
 
-  const flowSlicesFor = (stats: ChannelStats) => {
+  const flowSlicesFor = (stats: ChannelStats, includeOccupancy: boolean) => {
     const occupancy = Math.max(0, stats.peopleIn - stats.peopleOut);
-    return [
+    const slices = [
       { label: "In", value: stats.peopleIn, color: "var(--accent)" },
-      { label: "Out", value: stats.peopleOut, color: "var(--signal)" },
-      { label: "Occupancy", value: occupancy, color: "var(--accent-2)" }
+      { label: "Out", value: stats.peopleOut, color: "var(--signal)" }
     ];
+    if (includeOccupancy) {
+      slices.push({ label: "Occupancy", value: occupancy, color: "var(--accent-2)" });
+    }
+    return slices;
   };
 
   const loadDeviceList = async () => {
@@ -606,7 +730,7 @@ export default function Home() {
       const channels = detailData.channels.map((channel) => ({
         id: channel.id,
         name: channel.name?.trim() ? channel.name : `Channel ${channel.id}`,
-        zone: channel.zone ?? null,
+        zone: zoneDraftsRef.current[channel.id] ?? channel.zone ?? null,
         features: channel.features ?? [],
         capabilities: channel.capabilities ?? null,
         stats: statsMap.get(channel.id) ?? emptyStats()
@@ -703,11 +827,44 @@ export default function Home() {
           )
         };
       });
+      return true;
     } catch (err) {
       console.error(err);
+      return false;
     } finally {
       setChannelSaving((prev) => ({ ...prev, [channelId]: false }));
     }
+  };
+
+  const clearZoneDraft = (channelId: string) => {
+    setZoneDrafts((prev) => {
+      if (!prev[channelId]) return prev;
+      const next = { ...prev };
+      delete next[channelId];
+      return next;
+    });
+  };
+
+  const scheduleZoneSave = (channelId: string, value: string) => {
+    const timers = zoneSaveTimers.current;
+    if (timers[channelId]) {
+      window.clearTimeout(timers[channelId]);
+    }
+    timers[channelId] = window.setTimeout(async () => {
+      const ok = await saveChannelZone(channelId, value);
+      if (ok) clearZoneDraft(channelId);
+      delete timers[channelId];
+    }, 600);
+  };
+
+  const handleZoneBlur = async (channelId: string, value: string) => {
+    const timers = zoneSaveTimers.current;
+    if (timers[channelId]) {
+      window.clearTimeout(timers[channelId]);
+      delete timers[channelId];
+    }
+    const ok = await saveChannelZone(channelId, value);
+    if (ok) clearZoneDraft(channelId);
   };
 
   const resetChannelCounters = async (channelId: string) => {
@@ -800,6 +957,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    zoneDraftsRef.current = zoneDrafts;
+  }, [zoneDrafts]);
+
+  useEffect(() => {
     let isMounted = true;
     const loadSession = async () => {
       try {
@@ -841,6 +1002,75 @@ export default function Home() {
     }
     loadZoneChannels(selectedZone);
   }, [selectedZone, selectedDay]);
+
+  useEffect(() => {
+    if (!isUser) return;
+    if (!selectedDay) return;
+    setFlowRangeForHours(seriesHours, selectedDay);
+  }, [isUser, selectedDay]);
+
+  useEffect(() => {
+    if (!isUser) return;
+    setFlowRangeForHours(seriesHours);
+  }, [isUser, seriesHours]);
+
+  const zonePeopleChannels = useMemo(
+    () => zoneChannels.filter((channel) => isPeopleCountingChannel(channel)),
+    [zoneChannels]
+  );
+
+  const zonePeopleChannelKeys = useMemo(
+    () =>
+      zonePeopleChannels
+        .map((channel) => `${channel.cameraId}:${channel.channelId}`)
+        .sort()
+        .join("|"),
+    [zonePeopleChannels]
+  );
+
+  useEffect(() => {
+    if (!isUser) return;
+    setZoneSeriesByChannel({});
+  }, [isUser, selectedZone, zonePeopleChannelKeys, userFlowFrom, userFlowTo]);
+
+  useEffect(() => {
+    if (!isUser || zonePeopleChannels.length === 0) return;
+    if (!userFlowFrom || !userFlowTo) return;
+    let isMounted = true;
+    const loadSeries = async () => {
+      const params = new URLSearchParams({
+        bucket: "hour",
+        from: userFlowFrom,
+        to: userFlowTo
+      });
+      const next: Record<string, TimeseriesPoint[]> = {};
+      await Promise.all(
+        zonePeopleChannels.map(async (channel) => {
+          const key = `${channel.cameraId}:${channel.channelId}`;
+          try {
+            const res = await fetch(
+              `/api/zone/channel-timeseries?cameraId=${encodeURIComponent(
+                channel.cameraId
+              )}&channelNo=${encodeURIComponent(channel.channelId)}&${params.toString()}`
+            );
+            const data = (await res.json()) as ChannelTimeseriesResponse;
+            if (res.ok && data.ok) {
+              next[key] = data.series ?? [];
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        })
+      );
+      if (isMounted) {
+        setZoneSeriesByChannel(next);
+      }
+    };
+    loadSeries();
+    return () => {
+      isMounted = false;
+    };
+  }, [isUser, zonePeopleChannelKeys, userFlowFrom, userFlowTo]);
 
   useEffect(() => {
     loadOverview();
@@ -926,35 +1156,37 @@ export default function Home() {
       </header>
       {reportError && <div className="pill small-pill danger">{reportError}</div>}
 
-      <section className="hero">
-        <div className="hero-card">
-          <div>
-            <span className="eyebrow">Device Overview</span>
-            <h1>Registered devices by zone</h1>
-            <p className="small">
-              Monitor people flow and occupancy across all devices from one view.
-            </p>
+      <section className={`hero ${isUser ? "simple" : ""}`}>
+        {isAdmin && (
+          <div className="hero-card">
+            <div>
+              <span className="eyebrow">Device Overview</span>
+              <h1>Registered devices by zone</h1>
+              <p className="small">
+                Monitor people flow and occupancy across all devices from one view.
+              </p>
+            </div>
+            <div className="hero-stats">
+              <div className="stat-chip">
+                <span>Total</span>
+                <strong>{summary.total}</strong>
+              </div>
+              <div className="stat-chip">
+                <span>Cameras</span>
+                <strong>{summary.cameras}</strong>
+              </div>
+              <div className="stat-chip">
+                <span>AI Boxes</span>
+                <strong>{summary.aiBoxes}</strong>
+              </div>
+              <div className="stat-chip">
+                <span>Zones</span>
+                <strong>{summary.zones}</strong>
+              </div>
+            </div>
           </div>
-          <div className="hero-stats">
-            <div className="stat-chip">
-              <span>Total</span>
-              <strong>{summary.total}</strong>
-            </div>
-            <div className="stat-chip">
-              <span>Cameras</span>
-              <strong>{summary.cameras}</strong>
-            </div>
-            <div className="stat-chip">
-              <span>AI Boxes</span>
-              <strong>{summary.aiBoxes}</strong>
-            </div>
-            <div className="stat-chip">
-              <span>Zones</span>
-              <strong>{summary.zones}</strong>
-            </div>
-          </div>
-        </div>
-        <div className="hero-card">
+        )}
+        <div className={`hero-card ${isUser ? "wide" : ""}`}>
           <div className="header-min">
             <div>
               <span className="eyebrow">Zone Focus</span>
@@ -993,7 +1225,7 @@ export default function Home() {
             </div>
           </div>
           <div className="hero-stats">
-            {zoneCapabilityMix.hasPeopleCounting && (
+            {zoneCapabilityMix.hasPeopleCounting && isAdmin && (
               <>
                 <div className="stat-chip">
                   <span>Inside now</span>
@@ -1022,46 +1254,48 @@ export default function Home() {
               </>
             )}
             <div className="stat-chip">
-              <span>Devices</span>
-              <strong>{zoneDeviceCount}</strong>
+              <span>{isUser ? "Channels" : "Devices"}</span>
+              <strong>{isUser ? zoneChannelCount : zoneDeviceCount}</strong>
             </div>
           </div>
           {zoneError && <div className="pill small-pill danger">{zoneError}</div>}
         </div>
       </section>
 
-      <section className="layout">
-        <aside className="panel device-list">
-          <div className="header-min">
-            <h3>Devices</h3>
-            <span className="pill small-pill ghost">{deviceList.length} total</span>
-          </div>
-          <div className="zone-list">
-            <div className="device-cards">
-              {sidebarDevices.map((device) => {
-                const isActive = device.ip === selectedIp;
-                return (
-                  <button
-                    key={device.id}
-                    className={`device-card ${isActive ? "selected" : ""}`}
-                    onClick={() => selectDevice(device)}
-                  >
-                    <div>
-                      <div className="camera-name">{device.name || device.ip}</div>
-                      <div className="small">{device.ip}</div>
-                    </div>
-                    <div className="device-meta">
-                      <span className="pill small-pill ghost">
-                        {device.deviceType === "ai_box" ? "AI Box" : "Camera"}
-                      </span>
-                      <span className="small">{device.channelsTotal} ch</span>
-                    </div>
-                  </button>
-                );
-              })}
+      <section className={`layout ${isUser ? "simple" : ""}`}>
+        {isAdmin && (
+          <aside className="panel device-list">
+            <div className="header-min">
+              <h3>Devices</h3>
+              <span className="pill small-pill ghost">{deviceList.length} total</span>
             </div>
-          </div>
-        </aside>
+            <div className="zone-list">
+              <div className="device-cards">
+                {sidebarDevices.map((device) => {
+                  const isActive = device.ip === selectedIp;
+                  return (
+                    <button
+                      key={device.id}
+                      className={`device-card ${isActive ? "selected" : ""}`}
+                      onClick={() => selectDevice(device)}
+                    >
+                      <div>
+                        <div className="camera-name">{device.name || device.ip}</div>
+                        <div className="small">{device.ip}</div>
+                      </div>
+                      <div className="device-meta">
+                        <span className="pill small-pill ghost">
+                          {device.deviceType === "ai_box" ? "AI Box" : "Camera"}
+                        </span>
+                        <span className="small">{device.channelsTotal} ch</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+        )}
 
         <div className="stack">
           <section className="panel zone-section">
@@ -1080,11 +1314,11 @@ export default function Home() {
               <>
                 <div className="device-summary">
                   <div className="summary-card">
-                    <h4>Devices</h4>
-                    <div className="value">{zoneDeviceCount}</div>
+                    <h4>{isUser ? "Channels" : "Devices"}</h4>
+                    <div className="value">{isUser ? zoneChannelCount : zoneDeviceCount}</div>
                     <span className="small">In {selectedZone}</span>
                   </div>
-                  {zoneCapabilityMix.hasPeopleCounting && (
+                  {zoneCapabilityMix.hasPeopleCounting && isAdmin && (
                     <div className="summary-card">
                       <h4>People inside</h4>
                       <div className="value">{zoneTotals.occupancy}</div>
@@ -1122,7 +1356,15 @@ export default function Home() {
                         bars={[
                           { label: "Entered", value: zoneTotals.peopleIn, color: "var(--accent)" },
                           { label: "Exited", value: zoneTotals.peopleOut, color: "var(--signal)" },
-                          { label: "Inside", value: zoneTotals.occupancy, color: "var(--accent-2)" }
+                          ...(isAdmin
+                            ? [
+                                {
+                                  label: "Inside",
+                                  value: zoneTotals.occupancy,
+                                  color: "var(--accent-2)"
+                                }
+                              ]
+                            : [])
                         ]}
                       />
                     )}
@@ -1191,7 +1433,15 @@ export default function Home() {
                         slices={[
                           { label: "Entered", value: zoneTotals.peopleIn, color: "var(--accent)" },
                           { label: "Exited", value: zoneTotals.peopleOut, color: "var(--signal)" },
-                          { label: "Inside", value: zoneTotals.occupancy, color: "var(--accent-2)" }
+                          ...(isAdmin
+                            ? [
+                                {
+                                  label: "Inside",
+                                  value: zoneTotals.occupancy,
+                                  color: "var(--accent-2)"
+                                }
+                              ]
+                            : [])
                         ]}
                       />
                     )}
@@ -1213,7 +1463,8 @@ export default function Home() {
                     </div>
                   </div>
                 )}
-                {zoneChannels.length > 1 && <div className="camera-grid">
+                {(zoneChannels.length > 0 && (isUser || zoneChannels.length > 1)) && (
+                <div className="camera-grid">
                   {zoneChannels.map((channel) => {
                     const isFace = isFaceDeviceName(channel.cameraName) || isFaceChannel(
                       channel.channelName,
@@ -1221,14 +1472,48 @@ export default function Home() {
                       channel.capabilities,
                       channel.stats
                     );
+                    const hasPeopleCount = isPeopleCountingChannel(channel);
+                    const channelKey = `${channel.cameraId}:${channel.channelId}`;
+                    const channelSeries = zoneSeriesByChannel[channelKey] ?? [];
+                    const channelSeriesMap = new Map<string, TimeseriesPoint>();
+                    for (const point of channelSeries) {
+                      channelSeriesMap.set(normalizeHour(point.t), point);
+                    }
+                    const channelFlow = {
+                      timestamps: userFlowTimeline,
+                      peopleIn: userFlowTimeline.map(
+                        (stamp) => channelSeriesMap.get(stamp)?.peopleIn ?? 0
+                      ),
+                      peopleOut: userFlowTimeline.map(
+                        (stamp) => channelSeriesMap.get(stamp)?.peopleOut ?? 0
+                      )
+                    };
+                    const channelTotalIn = channelFlow.peopleIn.reduce((sum, value) => sum + value, 0);
+                    const channelTotalOut = channelFlow.peopleOut.reduce((sum, value) => sum + value, 0);
+                    const channelTotal = channelTotalIn + channelTotalOut;
+                    let channelPeakIndex = -1;
+                    let channelPeakValue = -1;
+                    for (let i = 0; i < channelFlow.timestamps.length; i += 1) {
+                      const value = (channelFlow.peopleIn[i] ?? 0) + (channelFlow.peopleOut[i] ?? 0);
+                      if (value > channelPeakValue) {
+                        channelPeakValue = value;
+                        channelPeakIndex = i;
+                      }
+                    }
+                    const channelPeakAt =
+                      channelPeakIndex >= 0 ? channelFlow.timestamps[channelPeakIndex] : null;
                     return (
                       <div key={`${channel.cameraId}-${channel.channelId}`} className="camera-card">
                         <div className="camera-header">
                           <div>
                             <div className="camera-name">{channel.channelName}</div>
-                            <div className="small">
-                              {channel.cameraName || channel.cameraIp} · Channel {channel.channelId}
-                            </div>
+                            {isAdmin ? (
+                              <div className="small">
+                                {channel.cameraName || channel.cameraIp} · Channel {channel.channelId}
+                              </div>
+                            ) : (
+                              <div className="small">Channel {channel.channelId}</div>
+                            )}
                           </div>
                           <div className="device-meta">
                             <span className="pill small-pill ghost">{selectedZone}</span>
@@ -1261,9 +1546,86 @@ export default function Home() {
                               <PieChart
                                 title="People flow"
                                 subtitle="In / Out / Occupancy"
-                                slices={flowSlicesFor(channel.stats)}
+                                slices={flowSlicesFor(channel.stats, isAdmin)}
                               />
                             )}
+                          </div>
+                        )}
+                        {isUser && hasPeopleCount && (
+                            <div className="chart-grid full-width">
+                              <div className="actions chart-actions">
+                                <span className="small">From</span>
+                                <input
+                                  type="date"
+                                  value={userFlowFrom}
+                                  onChange={(event) => handleUserFlowFromChange(event.target.value)}
+                                />
+                                <span className="small">To</span>
+                                <input
+                                  type="date"
+                                  value={userFlowTo}
+                                  onChange={(event) => handleUserFlowToChange(event.target.value)}
+                                />
+                                <button
+                                  className={`pill small-pill ghost ${
+                                    seriesHours === 24 ? "active" : ""
+                                  }`}
+                                  onClick={() => {
+                                    setSeriesHours(24);
+                                    setFlowRangeForHours(24);
+                                  }}
+                                >
+                                  24h
+                                </button>
+                                <button
+                                  className={`pill small-pill ghost ${
+                                    seriesHours === 72 ? "active" : ""
+                                  }`}
+                                  onClick={() => {
+                                    setSeriesHours(72);
+                                    setFlowRangeForHours(72);
+                                  }}
+                                >
+                                  3d
+                                </button>
+                                <button
+                                  className={`pill small-pill ghost ${
+                                    seriesHours === 168 ? "active" : ""
+                                  }`}
+                                  onClick={() => {
+                                    setSeriesHours(168);
+                                    setFlowRangeForHours(168);
+                                  }}
+                                >
+                                  7d
+                                </button>
+                              </div>
+                              <LineChart
+                                title="People flow by hour"
+                                subtitle={`From ${userFlowFrom} to ${userFlowTo}`}
+                                timestamps={channelFlow.timestamps}
+                              series={[
+                                { label: "In", color: "var(--accent)", data: channelFlow.peopleIn },
+                                { label: "Out", color: "var(--signal)", data: channelFlow.peopleOut }
+                              ]}
+                            />
+                          </div>
+                        )}
+                        {isUser && hasPeopleCount && (
+                          <div className="micro-metrics">
+                            <div className="metric-pill">
+                              <span>In</span>
+                              <strong>{percent(channelTotalIn, channelTotal)}%</strong>
+                            </div>
+                            <div className="metric-pill">
+                              <span>Out</span>
+                              <strong>{percent(channelTotalOut, channelTotal)}%</strong>
+                            </div>
+                            <div className="metric-pill">
+                              <span>Peak</span>
+                              <strong>{Math.max(0, channelPeakValue)}</strong>
+                              <em>{formatHourLabel(channelPeakAt)}</em>
+                            </div>
                           </div>
                         )}
                         <div className="small">
@@ -1272,7 +1634,8 @@ export default function Home() {
                       </div>
                     );
                   })}
-                </div>}
+                </div>
+                )}
               </>
             )}
             {!selectedZone && (
@@ -1286,225 +1649,227 @@ export default function Home() {
             )}
           </section>
 
-          <div className="actions">
-            <button
-              className="pill small-pill ghost"
-              onClick={() => setShowAllDevicesStats((prev) => !prev)}
-            >
-              {showAllDevicesStats ? "Hide all devices stats" : "Show all devices stats"}
-            </button>
-          </div>
-
-          {showAllDevicesStats && overview && genderPie && agePie && (
-            <section className="panel">
-              <div className="header-min">
-                <h3>All devices stats</h3>
-                <div className="actions">
-                  <input
-                    type="date"
-                    value={selectedDay}
-                    onChange={(event) => setSelectedDay(event.target.value)}
-                  />
-                  <button
-                    className="pill small-pill ghost"
-                    onClick={() => setSelectedDay(new Date().toLocaleDateString("en-CA"))}
-                  >
-                    Today
-                  </button>
-                </div>
-              </div>
-              <div className="device-summary">
-                <div className="summary-card">
-                  <h4>Total people in</h4>
-                  <div className="value">{overview.totals.peopleIn}</div>
-                  <span className="small">Across all devices</span>
-                </div>
-                <div className="summary-card">
-                  <h4>Total people out</h4>
-                  <div className="value">{overview.totals.peopleOut}</div>
-                  <span className="small">Across all devices</span>
-                </div>
-              </div>
-              <div className="pie-grid">
-                <PieChart title="Gender mix" subtitle="Attributes" slices={genderPie} />
-                <PieChart title="Age range" subtitle="Attributes" slices={agePie} />
-              </div>
-            </section>
-          )}
-
-          <div className="actions">
-            <button
-              className="pill small-pill ghost"
-              onClick={() => setShowSelectedDeviceStats((prev) => !prev)}
-            >
-              {showSelectedDeviceStats
-                ? "Hide selected device stats"
-                : "Show selected device stats"}
-            </button>
-          </div>
-
-          {showSelectedDeviceStats && (
-          <section className="panel">
-            <div className="header-min">
-              <div>
-                <h3>Live device insight</h3>
-                <span className="small">
-                  {deviceInfo?.name || deviceInfo?.ip || "Select a device"}
-                </span>
-              </div>
+          {isAdmin && (
+            <>
               <div className="actions">
-                <button className="pill small-pill ghost" onClick={() => loadDeviceList()}>
-                  Refresh list
-                </button>
                 <button
                   className="pill small-pill ghost"
-                  onClick={() => selectedIp && loadDeviceContext(selectedIp)}
+                  onClick={() => setShowAllDevicesStats((prev) => !prev)}
                 >
-                  Refresh stats
+                  {showAllDevicesStats ? "Hide all devices stats" : "Show all devices stats"}
                 </button>
               </div>
-            </div>
-            {deviceInfo ? (
-              <div className="device-summary">
-                <div className="summary-card">
-                  <h4>Channel zones</h4>
-                  <div className="value">{channelZones.length}</div>
-                  <span className="small">
-                    {channelZones.length ? channelZones.join(", ") : "No zones assigned"}
-                  </span>
-                </div>
-                <div className="summary-card">
-                  <h4>Type</h4>
-                  <div className="value">
-                    {deviceInfo.deviceType === "ai_box" ? "AI Box" : "Camera"}
+
+              {showAllDevicesStats && overview && genderPie && agePie && (
+                <section className="panel">
+                  <div className="header-min">
+                    <h3>All devices stats</h3>
+                    <div className="actions">
+                      <input
+                        type="date"
+                        value={selectedDay}
+                        onChange={(event) => setSelectedDay(event.target.value)}
+                      />
+                      <button
+                        className="pill small-pill ghost"
+                        onClick={() => setSelectedDay(new Date().toLocaleDateString("en-CA"))}
+                      >
+                        Today
+                      </button>
+                    </div>
                   </div>
-                  <span className="small">{deviceInfo.channels.length} channels</span>
-                </div>
-                {!isFaceDeviceName(deviceInfo.name) && (
-                  <>
+                  <div className="device-summary">
                     <div className="summary-card">
-                      <h4>People in</h4>
-                      <div className="value">{channelTotals?.peopleIn ?? 0}</div>
-                      <span className="small">Total today</span>
+                      <h4>Total people in</h4>
+                      <div className="value">{overview.totals.peopleIn}</div>
+                      <span className="small">Across all devices</span>
                     </div>
                     <div className="summary-card">
-                      <h4>People out</h4>
-                      <div className="value">{channelTotals?.peopleOut ?? 0}</div>
-                      <span className="small">Total today</span>
+                      <h4>Total people out</h4>
+                      <div className="value">{overview.totals.peopleOut}</div>
+                      <span className="small">Across all devices</span>
                     </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="empty-state">
-                <div className="orb small" />
-                <div>
-                  <div className="camera-name">No device selected</div>
-                  <p className="small">Choose a device from the left panel to load analytics.</p>
-                </div>
-              </div>
-            )}
-          </section>
-          )}
+                  </div>
+                  <div className="pie-grid">
+                    <PieChart title="Gender mix" subtitle="Attributes" slices={genderPie} />
+                    <PieChart title="Age range" subtitle="Attributes" slices={agePie} />
+                  </div>
+                </section>
+              )}
 
-          {showSelectedDeviceStats && !isFaceDeviceName(deviceInfo?.name) && (
-            <section className="panel flow-section">
-              <div className="header-min">
-                <div>
-                  <h3>Flow timelines</h3>
-                  <span className="small">
-                    Selected date {selectedDay} · Hourly people counts for this device
-                  </span>
-                </div>
-                <div className="actions">
-                  <button
-                    className={`pill small-pill ghost ${seriesHours === 24 ? "active" : ""}`}
-                    onClick={() => setSeriesHours(24)}
-                  >
-                    24h
-                  </button>
-                  <button
-                    className={`pill small-pill ghost ${seriesHours === 72 ? "active" : ""}`}
-                    onClick={() => setSeriesHours(72)}
-                  >
-                    3d
-                  </button>
-                  <button
-                    className={`pill small-pill ghost ${seriesHours === 168 ? "active" : ""}`}
-                    onClick={() => setSeriesHours(168)}
-                  >
-                    7d
-                  </button>
-                </div>
+              <div className="actions">
+                <button
+                  className="pill small-pill ghost"
+                  onClick={() => setShowSelectedDeviceStats((prev) => !prev)}
+                >
+                  {showSelectedDeviceStats
+                    ? "Hide selected device stats"
+                    : "Show selected device stats"}
+                </button>
               </div>
-              <div className="device-summary">
-                <div className="summary-card">
-                  <h4>Total in (range)</h4>
-                  <div className="value">{flowSummary.totalIn}</div>
-                  <span className="small">Selected {seriesHours}h window</span>
-                </div>
-                <div className="summary-card">
-                  <h4>Total out (range)</h4>
-                  <div className="value">{flowSummary.totalOut}</div>
-                  <span className="small">Selected {seriesHours}h window</span>
-                </div>
-                <div className="summary-card">
-                  <h4>Peak hour</h4>
-                  <div className="value">{flowSummary.peakValue}</div>
-                  <span className="small">In + Out at {flowSummary.peakAt}</span>
-                </div>
-              </div>
-              <div className="chart-grid">
-                <LineChart
-                  title="People flow by hour"
-                  subtitle="Yellow = entered, red = exited"
-                  timestamps={chartSeries.timestamps}
-                  series={[
-                    { label: "In", color: "var(--accent)", data: chartSeries.peopleIn },
-                    { label: "Out", color: "var(--signal)", data: chartSeries.peopleOut }
-                  ]}
-                />
-              </div>
-            </section>
-          )}
 
-
-          {showSelectedDeviceStats && deviceInfo && (
-            <section className="panel">
-              <div className="header-min">
-                <h3>Channel analytics</h3>
-                <span className="pill small-pill ghost">
-                  {deviceInfo.channels.length} channels
-                </span>
-              </div>
-              <div className="camera-grid">
-                {deviceInfo.channels.map((channel) => {
-                  const isFaceDevice = isFaceDeviceName(deviceInfo.name);
-                  const isFace = isFaceDevice || isFaceChannel(
-                    channel.name,
-                    channel.features,
-                    channel.capabilities,
-                    channel.stats
-                  );
-                  const hasPeopleCount =
-                    !isFaceDevice &&
-                    !isFace &&
-                    channel.features.some((feature) => feature.toLowerCase().includes("people"));
-                  return (
-                    <div key={channel.id} className="camera-card">
-                      <div className="camera-header">
-                        <div>
-                          <div className="camera-name">
-                            {channel.name?.trim() ? channel.name : `Channel ${channel.id}`}
+              {showSelectedDeviceStats && (
+                <section className="panel">
+                  <div className="header-min">
+                    <div>
+                      <h3>Live device insight</h3>
+                      <span className="small">
+                        {deviceInfo?.name || deviceInfo?.ip || "Select a device"}
+                      </span>
+                    </div>
+                    <div className="actions">
+                      <button className="pill small-pill ghost" onClick={() => loadDeviceList()}>
+                        Refresh list
+                      </button>
+                      <button
+                        className="pill small-pill ghost"
+                        onClick={() => selectedIp && loadDeviceContext(selectedIp)}
+                      >
+                        Refresh stats
+                      </button>
+                    </div>
+                  </div>
+                  {deviceInfo ? (
+                    <div className="device-summary">
+                      <div className="summary-card">
+                        <h4>Channel zones</h4>
+                        <div className="value">{channelZones.length}</div>
+                        <span className="small">
+                          {channelZones.length ? channelZones.join(", ") : "No zones assigned"}
+                        </span>
+                      </div>
+                      <div className="summary-card">
+                        <h4>Type</h4>
+                        <div className="value">
+                          {deviceInfo.deviceType === "ai_box" ? "AI Box" : "Camera"}
+                        </div>
+                        <span className="small">{deviceInfo.channels.length} channels</span>
+                      </div>
+                      {!isFaceDeviceName(deviceInfo.name) && (
+                        <>
+                          <div className="summary-card">
+                            <h4>People in</h4>
+                            <div className="value">{channelTotals?.peopleIn ?? 0}</div>
+                            <span className="small">Total today</span>
                           </div>
-                          <input
-                            className="camera-name-input channel-zone-input"
-                            value={channel.zone ?? ""}
-                            placeholder="Zone"
-                            disabled={!isAdmin}
-                            title={!isAdmin ? "Admin only" : undefined}
+                          <div className="summary-card">
+                            <h4>People out</h4>
+                            <div className="value">{channelTotals?.peopleOut ?? 0}</div>
+                            <span className="small">Total today</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <div className="orb small" />
+                      <div>
+                        <div className="camera-name">No device selected</div>
+                        <p className="small">Choose a device from the left panel to load analytics.</p>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {showSelectedDeviceStats && !isFaceDeviceName(deviceInfo?.name) && (
+                <section className="panel flow-section">
+                  <div className="header-min">
+                    <div>
+                      <h3>Flow timelines</h3>
+                      <span className="small">
+                        Selected date {selectedDay} · Hourly people counts for this device
+                      </span>
+                    </div>
+                    <div className="actions">
+                      <button
+                        className={`pill small-pill ghost ${seriesHours === 24 ? "active" : ""}`}
+                        onClick={() => setSeriesHours(24)}
+                      >
+                        24h
+                      </button>
+                      <button
+                        className={`pill small-pill ghost ${seriesHours === 72 ? "active" : ""}`}
+                        onClick={() => setSeriesHours(72)}
+                      >
+                        3d
+                      </button>
+                      <button
+                        className={`pill small-pill ghost ${seriesHours === 168 ? "active" : ""}`}
+                        onClick={() => setSeriesHours(168)}
+                      >
+                        7d
+                      </button>
+                    </div>
+                  </div>
+                  <div className="device-summary">
+                    <div className="summary-card">
+                      <h4>Total in (range)</h4>
+                      <div className="value">{flowSummary.totalIn}</div>
+                      <span className="small">Selected {seriesHours}h window</span>
+                    </div>
+                    <div className="summary-card">
+                      <h4>Total out (range)</h4>
+                      <div className="value">{flowSummary.totalOut}</div>
+                      <span className="small">Selected {seriesHours}h window</span>
+                    </div>
+                    <div className="summary-card">
+                      <h4>Peak hour</h4>
+                      <div className="value">{flowSummary.peakValue}</div>
+                      <span className="small">In + Out at {flowSummary.peakAt}</span>
+                    </div>
+                  </div>
+                  <div className="chart-grid">
+                    <LineChart
+                      title="People flow by hour"
+                      subtitle="Yellow = entered, red = exited"
+                      timestamps={chartSeries.timestamps}
+                      series={[
+                        { label: "In", color: "var(--accent)", data: chartSeries.peopleIn },
+                        { label: "Out", color: "var(--signal)", data: chartSeries.peopleOut }
+                      ]}
+                    />
+                  </div>
+                </section>
+              )}
+
+              {showSelectedDeviceStats && deviceInfo && (
+                <section className="panel">
+                  <div className="header-min">
+                    <h3>Channel analytics</h3>
+                    <span className="pill small-pill ghost">
+                      {deviceInfo.channels.length} channels
+                    </span>
+                  </div>
+                  <div className="camera-grid">
+                    {deviceInfo.channels.map((channel) => {
+                      const isFaceDevice = isFaceDeviceName(deviceInfo.name);
+                      const isFace = isFaceDevice || isFaceChannel(
+                        channel.name,
+                        channel.features,
+                        channel.capabilities,
+                        channel.stats
+                      );
+                      const hasPeopleCount =
+                        !isFaceDevice &&
+                        !isFace &&
+                        channel.features.some((feature) => feature.toLowerCase().includes("people"));
+                      return (
+                        <div key={channel.id} className="camera-card">
+                          <div className="camera-header">
+                            <div>
+                              <div className="camera-name">
+                                {channel.name?.trim() ? channel.name : `Channel ${channel.id}`}
+                              </div>
+                              <input
+                                className="camera-name-input channel-zone-input"
+                                value={channel.zone ?? ""}
+                                placeholder="Zone"
+                                disabled={!isAdmin}
+                                title={!isAdmin ? "Admin only" : undefined}
                             onChange={(event) => {
                               const nextValue = event.target.value;
+                              setZoneDrafts((prev) => ({ ...prev, [channel.id]: nextValue }));
                               setDeviceInfo((prev) => {
                                 if (!prev) return prev;
                                 return {
@@ -1516,71 +1881,76 @@ export default function Home() {
                                   )
                                 };
                               });
+                              scheduleZoneSave(channel.id, nextValue);
                             }}
-                            onBlur={() => saveChannelZone(channel.id, channel.zone ?? "")}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.currentTarget.blur();
-                              }
-                            }}
-                          />
+                            onBlur={(event) => handleZoneBlur(channel.id, event.currentTarget.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.currentTarget.blur();
+                                  }
+                                }}
+                              />
+                            </div>
+                            <div className="device-meta">
+                              <span className="pill small-pill ghost">Channel {channel.id}</span>
+                              {isAdmin && hasPeopleCount && (
+                                <button
+                                  className="pill small-pill ghost"
+                                  onClick={() => resetChannelCounters(channel.id)}
+                                  disabled={resettingChannels[channel.id]}
+                                >
+                                  {resettingChannels[channel.id] ? "Resetting..." : "Reset count"}
+                                </button>
+                              )}
+                              {channelSaving[channel.id] && (
+                                <span className="pill small-pill ghost">Saving</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mini-grid">
+                            {isFace ? (
+                              <>
+                                <div className="mini">
+                                  <h5>Gender</h5>
+                                  <div className="value">
+                                    M {channel.stats.gender.male} · F {channel.stats.gender.female} · U{" "}
+                                    {channel.stats.gender.unknown}
+                                  </div>
+                                </div>
+                                <div className="mini">
+                                  <h5>Avg age</h5>
+                                  <div className="value">{formatAvgAge(channel.stats.age.avg)}</div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="mini">
+                                  <h5>In</h5>
+                                  <div className="value">{channel.stats.peopleIn}</div>
+                                </div>
+                                <div className="mini">
+                                  <h5>Out</h5>
+                                  <div className="value">{channel.stats.peopleOut}</div>
+                                </div>
+                                <div className="mini">
+                                  <h5>Occupancy</h5>
+                                  <div className="value">
+                                    {Math.max(0, channel.stats.peopleIn - channel.stats.peopleOut)}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          <div className="small">
+                            Last event: {formatEventTime(channel.stats.lastEventAt)}
+                          </div>
                         </div>
-                        <div className="device-meta">
-                          <span className="pill small-pill ghost">Channel {channel.id}</span>
-                          {isAdmin && hasPeopleCount && (
-                            <button
-                              className="pill small-pill ghost"
-                              onClick={() => resetChannelCounters(channel.id)}
-                              disabled={resettingChannels[channel.id]}
-                            >
-                              {resettingChannels[channel.id] ? "Resetting..." : "Reset count"}
-                            </button>
-                          )}
-                          {channelSaving[channel.id] && (
-                            <span className="pill small-pill ghost">Saving</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="mini-grid">
-                        {isFace ? (
-                          <>
-                            <div className="mini">
-                              <h5>Gender</h5>
-                              <div className="value">
-                                M {channel.stats.gender.male} · F {channel.stats.gender.female} · U{" "}
-                                {channel.stats.gender.unknown}
-                              </div>
-                            </div>
-                            <div className="mini">
-                              <h5>Avg age</h5>
-                              <div className="value">{formatAvgAge(channel.stats.age.avg)}</div>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="mini">
-                              <h5>In</h5>
-                              <div className="value">{channel.stats.peopleIn}</div>
-                            </div>
-                            <div className="mini">
-                              <h5>Out</h5>
-                              <div className="value">{channel.stats.peopleOut}</div>
-                            </div>
-                            <div className="mini">
-                              <h5>Occupancy</h5>
-                              <div className="value">
-                                {Math.max(0, channel.stats.peopleIn - channel.stats.peopleOut)}
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                      <div className="small">Last event: {formatEventTime(channel.stats.lastEventAt)}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+            </>
           )}
 
 

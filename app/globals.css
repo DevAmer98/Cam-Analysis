@@ -421,6 +421,12 @@ select option {
   flex-wrap: wrap;
 }
 
+.chart-actions {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+  grid-column: 1 / -1;
+}
+
 .actions select {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -663,6 +669,27 @@ button {
   margin: 0 auto;
   position: relative;
   box-shadow: var(--shadow-strong);
+}
+
+.pie-wrap {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  margin: 0 auto;
+}
+
+.pie-wrap .pie {
+  position: absolute;
+  inset: 20px;
+  margin: 0;
+}
+
+.pie-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.35));
 }
 
 .pie::after {
@@ -1068,6 +1095,10 @@ button {
   margin-bottom: 28px;
 }
 
+.hero.simple {
+  grid-template-columns: 1fr;
+}
+
 .hero-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1079,6 +1110,9 @@ button {
   gap: 16px;
 }
 
+.hero-card.wide {
+  grid-column: 1 / -1;
+}
 .hero-card h1 {
   font-size: clamp(1.6rem, 2vw, 2.2rem);
   margin: 8px 0 10px;
@@ -1099,6 +1133,42 @@ button {
   justify-content: space-between;
   align-items: center;
   font-weight: 600;
+}
+
+.micro-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.metric-pill {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.metric-pill span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.metric-pill strong {
+  font-size: 1rem;
+}
+
+.metric-pill em {
+  grid-column: 1 / -1;
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .form-grid {
@@ -1139,6 +1209,9 @@ button {
   align-items: start;
 }
 
+.layout.simple {
+  grid-template-columns: 1fr;
+}
 .stack {
   display: flex;
   flex-direction: column;
@@ -1228,6 +1301,10 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
+}
+
+.chart-grid.full-width {
+  grid-template-columns: 1fr;
 }
 
 .chart-card {

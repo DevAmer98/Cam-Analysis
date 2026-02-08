@@ -127,7 +127,7 @@ export function LineChart({ title, subtitle, timestamps, series }: Props) {
               d={buildPath(line.data, width, height)}
               fill="none"
               stroke={line.color}
-              strokeWidth="1.2"
+              strokeWidth="2.8"
               strokeLinecap="round"
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
