@@ -262,7 +262,7 @@ export default function Home() {
         acc.peopleOut += channel.stats.peopleOut;
         acc.faceEvents += channel.stats.faceEvents;
         acc.facesDetected += channel.stats.facesDetected;
-        acc.occupancy += Math.max(0, channel.stats.peopleIn - channel.stats.peopleOut);
+        acc.occupancy += channel.stats.peopleIn - channel.stats.peopleOut;
         return acc;
       },
       { peopleIn: 0, peopleOut: 0, faceEvents: 0, facesDetected: 0, occupancy: 0 }
@@ -286,7 +286,7 @@ export default function Home() {
         acc.peopleOut += channel.stats.peopleOut;
         acc.faceEvents += channel.stats.faceEvents;
         acc.facesDetected += channel.stats.facesDetected;
-        acc.occupancy += Math.max(0, channel.stats.peopleIn - channel.stats.peopleOut);
+        acc.occupancy += channel.stats.peopleIn - channel.stats.peopleOut;
         return acc;
       },
       { peopleIn: 0, peopleOut: 0, faceEvents: 0, facesDetected: 0, occupancy: 0 }
@@ -624,7 +624,7 @@ export default function Home() {
   ];
 
   const flowSlicesFor = (stats: ChannelStats, includeOccupancy: boolean) => {
-    const occupancy = Math.max(0, stats.peopleIn - stats.peopleOut);
+    const occupancy = stats.peopleIn - stats.peopleOut;
     const slices = [
       { label: "In", value: stats.peopleIn, color: "var(--accent)" },
       { label: "Out", value: stats.peopleOut, color: "var(--signal)" }
@@ -1318,7 +1318,7 @@ export default function Home() {
                     <div className="value">{isUser ? zoneChannelCount : zoneDeviceCount}</div>
                     <span className="small">In {selectedZone}</span>
                   </div>
-                  {zoneCapabilityMix.hasPeopleCounting && isAdmin && (
+                  {zoneCapabilityMix.hasPeopleCounting && (
                     <div className="summary-card">
                       <h4>People inside</h4>
                       <div className="value">{zoneTotals.occupancy}</div>
@@ -1356,15 +1356,11 @@ export default function Home() {
                         bars={[
                           { label: "Entered", value: zoneTotals.peopleIn, color: "var(--accent)" },
                           { label: "Exited", value: zoneTotals.peopleOut, color: "var(--signal)" },
-                          ...(isAdmin
-                            ? [
-                                {
-                                  label: "Inside",
-                                  value: zoneTotals.occupancy,
-                                  color: "var(--accent-2)"
-                                }
-                              ]
-                            : [])
+                          {
+                            label: "Inside",
+                            value: zoneTotals.occupancy,
+                            color: "var(--accent-2)"
+                          }
                         ]}
                       />
                     )}
@@ -1433,18 +1429,14 @@ export default function Home() {
                         slices={[
                           { label: "Entered", value: zoneTotals.peopleIn, color: "var(--accent)" },
                           { label: "Exited", value: zoneTotals.peopleOut, color: "var(--signal)" },
-                          ...(isAdmin
-                            ? [
-                                {
-                                  label: "Inside",
-                                  value: zoneTotals.occupancy,
-                                  color: "var(--accent-2)"
-                                }
-                              ]
-                            : [])
-                        ]}
-                      />
-                    )}
+                        {
+                          label: "Inside",
+                          value: zoneTotals.occupancy,
+                          color: "var(--accent-2)"
+                        }
+                      ]}
+                    />
+                  )}
                   </div>
                 )}
                 {!zoneCapabilityMix.hasFace && (
@@ -1546,7 +1538,7 @@ export default function Home() {
                               <PieChart
                                 title="People flow"
                                 subtitle="In / Out / Occupancy"
-                                slices={flowSlicesFor(channel.stats, isAdmin)}
+                                slices={flowSlicesFor(channel.stats, true)}
                               />
                             )}
                           </div>
