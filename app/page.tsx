@@ -205,6 +205,7 @@ export default function Home() {
   );
   const [showAllDevicesStats, setShowAllDevicesStats] = useState(false);
   const [showSelectedDeviceStats, setShowSelectedDeviceStats] = useState(false);
+  const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportScope, setReportScope] = useState<"all" | "zone">("all");
@@ -655,7 +656,7 @@ export default function Home() {
       const url = selectedDay
         ? `/api/overview?day=${encodeURIComponent(selectedDay)}`
         : "/api/overview";
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: "no-store" });
       const data = (await res.json()) as OverviewResponse;
       if (res.ok && data.ok) {
         setOverview(data);
@@ -687,7 +688,7 @@ export default function Home() {
       const url = selectedDay
         ? `/api/zone/channels?zone=${encodeURIComponent(zone)}&day=${encodeURIComponent(selectedDay)}`
         : `/api/zone/channels?zone=${encodeURIComponent(zone)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: "no-store" });
       const data = (await res.json()) as ZoneChannelsResponse;
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to load zone channels.");
@@ -705,10 +706,13 @@ export default function Home() {
     try {
       const dayParam = selectedDay ? `&day=${encodeURIComponent(selectedDay)}` : "";
       const [detailRes, statsRes, seriesRes] = await Promise.all([
-        fetch(`/api/camera/detail?ip=${encodeURIComponent(ip)}`),
-        fetch(`/api/camera/stats?ip=${encodeURIComponent(ip)}${dayParam}`),
+        fetch(`/api/camera/detail?ip=${encodeURIComponent(ip)}`, { cache: "no-store" }),
+        fetch(`/api/camera/stats?ip=${encodeURIComponent(ip)}${dayParam}`, {
+          cache: "no-store"
+        }),
         fetch(
-          `/api/camera/timeseries?ip=${encodeURIComponent(ip)}&hours=${seriesHours}${dayParam}`
+          `/api/camera/timeseries?ip=${encodeURIComponent(ip)}&hours=${seriesHours}${dayParam}`,
+          { cache: "no-store" }
         )
       ]);
 
@@ -749,6 +753,21 @@ export default function Home() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const refreshSelectedStats = async () => {
+    if (!selectedIp) return;
+    setStatsRefreshing(true);
+    try {
+      await Promise.all([
+        loadDeviceContext(selectedIp),
+        loadOverview(),
+        loadDeviceList(),
+        selectedZone ? loadZoneChannels(selectedZone) : Promise.resolve()
+      ]);
+    } finally {
+      setStatsRefreshing(false);
     }
   };
 
@@ -1167,7 +1186,7 @@ export default function Home() {
               </p>
             </div>
             <div className="hero-stats">
-              <div className="stat-chip">
+              <div className="stat-chip stat-highlight">
                 <span>Total</span>
                 <strong>{summary.total}</strong>
               </div>
@@ -1227,15 +1246,15 @@ export default function Home() {
           <div className="hero-stats">
             {zoneCapabilityMix.hasPeopleCounting && isAdmin && (
               <>
-                <div className="stat-chip">
+                <div className="stat-chip stat-occ">
                   <span>Inside now</span>
                   <strong>{zoneTotals.occupancy}</strong>
                 </div>
-                <div className="stat-chip">
+                <div className="stat-chip stat-in">
                   <span>Entered</span>
                   <strong>{zoneTotals.peopleIn}</strong>
                 </div>
-                <div className="stat-chip">
+                <div className="stat-chip stat-out">
                   <span>Exited</span>
                   <strong>{zoneTotals.peopleOut}</strong>
                 </div>
@@ -1243,11 +1262,11 @@ export default function Home() {
             )}
             {zoneCapabilityMix.hasFace && (
               <>
-                <div className="stat-chip">
+                <div className="stat-chip stat-face">
                   <span>Face events</span>
                   <strong>{zoneTotals.faceEvents}</strong>
                 </div>
-                <div className="stat-chip">
+                <div className="stat-chip stat-face">
                   <span>Faces detected</span>
                   <strong>{zoneTotals.facesDetected}</strong>
                 </div>
@@ -1319,28 +1338,28 @@ export default function Home() {
                     <span className="small">In {selectedZone}</span>
                   </div>
                   {zoneCapabilityMix.hasPeopleCounting && (
-                    <div className="summary-card">
+                    <div className="summary-card stat-occ">
                       <h4>People inside</h4>
                       <div className="value">{zoneTotals.occupancy}</div>
                       <span className="small">Current net occupancy</span>
                     </div>
                   )}
                   {zoneCapabilityMix.hasPeopleCounting && (
-                    <div className="summary-card">
+                    <div className="summary-card stat-in">
                       <h4>People entered</h4>
                       <div className="value">{zoneTotals.peopleIn}</div>
                       <span className="small">Total in selected day</span>
                     </div>
                   )}
                   {zoneCapabilityMix.hasPeopleCounting && (
-                    <div className="summary-card">
+                    <div className="summary-card stat-out">
                       <h4>People exited</h4>
                       <div className="value">{zoneTotals.peopleOut}</div>
                       <span className="small">Total in selected day</span>
                     </div>
                   )}
                   {zoneCapabilityMix.hasFace && (
-                    <div className="summary-card">
+                    <div className="summary-card stat-face">
                       <h4>Face events</h4>
                       <div className="value">{zoneTotals.faceEvents}</div>
                       <span className="small">Total in selected day</span>
@@ -1671,12 +1690,12 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="device-summary">
-                    <div className="summary-card">
+                    <div className="summary-card stat-in">
                       <h4>Total people in</h4>
                       <div className="value">{overview.totals.peopleIn}</div>
                       <span className="small">Across all devices</span>
                     </div>
-                    <div className="summary-card">
+                    <div className="summary-card stat-out">
                       <h4>Total people out</h4>
                       <div className="value">{overview.totals.peopleOut}</div>
                       <span className="small">Across all devices</span>
@@ -1698,6 +1717,13 @@ export default function Home() {
                     ? "Hide selected device stats"
                     : "Show selected device stats"}
                 </button>
+                <button
+                  className="pill small-pill ghost"
+                  onClick={() => void refreshSelectedStats()}
+                  disabled={!selectedIp || statsRefreshing}
+                >
+                  {statsRefreshing ? "Refreshing..." : "Refresh stats"}
+                </button>
               </div>
 
               {showSelectedDeviceStats && (
@@ -1715,9 +1741,10 @@ export default function Home() {
                       </button>
                       <button
                         className="pill small-pill ghost"
-                        onClick={() => selectedIp && loadDeviceContext(selectedIp)}
+                        onClick={() => void refreshSelectedStats()}
+                        disabled={!selectedIp || statsRefreshing}
                       >
-                        Refresh stats
+                        {statsRefreshing ? "Refreshing..." : "Refresh stats"}
                       </button>
                     </div>
                   </div>
@@ -1739,12 +1766,12 @@ export default function Home() {
                       </div>
                       {!isFaceDeviceName(deviceInfo.name) && (
                         <>
-                          <div className="summary-card">
+                          <div className="summary-card stat-in">
                             <h4>People in</h4>
                             <div className="value">{channelTotals?.peopleIn ?? 0}</div>
                             <span className="small">Total today</span>
                           </div>
-                          <div className="summary-card">
+                          <div className="summary-card stat-out">
                             <h4>People out</h4>
                             <div className="value">{channelTotals?.peopleOut ?? 0}</div>
                             <span className="small">Total today</span>
@@ -1795,17 +1822,17 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="device-summary">
-                    <div className="summary-card">
+                    <div className="summary-card stat-in">
                       <h4>Total in (range)</h4>
                       <div className="value">{flowSummary.totalIn}</div>
                       <span className="small">Selected {seriesHours}h window</span>
                     </div>
-                    <div className="summary-card">
+                    <div className="summary-card stat-out">
                       <h4>Total out (range)</h4>
                       <div className="value">{flowSummary.totalOut}</div>
                       <span className="small">Selected {seriesHours}h window</span>
                     </div>
-                    <div className="summary-card">
+                    <div className="summary-card stat-occ">
                       <h4>Peak hour</h4>
                       <div className="value">{flowSummary.peakValue}</div>
                       <span className="small">In + Out at {flowSummary.peakAt}</span>

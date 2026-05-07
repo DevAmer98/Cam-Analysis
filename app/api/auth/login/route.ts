@@ -26,14 +26,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Missing credentials." }, { status: 400 });
   }
 
-  const db = getDbPool();
-  const result = await db.query(
-    "select username, password_hash, role from users where username = $1",
-    [username]
-  );
-  const user = result.rows[0] as
+  let user:
     | { username: string; password_hash: string; role: "admin" | "user" }
     | undefined;
+  try {
+    const db = getDbPool();
+    const result = await db.query(
+      "select username, password_hash, role from users where username = $1",
+      [username]
+    );
+    user = result.rows[0] as
+      | { username: string; password_hash: string; role: "admin" | "user" }
+      | undefined;
+  } catch (err) {
+    console.error("Login database error:", err);
+    return NextResponse.json(
+      { ok: false, error: "Unable to reach authentication database." },
+      { status: 500 }
+    );
+  }
 
   if (!user || !verifyPassword(password, user.password_hash)) {
     return NextResponse.json({ ok: false, error: "Invalid credentials." }, { status: 401 });

@@ -32,7 +32,10 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim(), password })
       });
-      const data = (await res.json()) as { ok: boolean; error?: string };
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? ((await res.json()) as { ok: boolean; error?: string })
+        : { ok: false, error: "Login server returned an invalid response." };
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Login failed.");
       }
