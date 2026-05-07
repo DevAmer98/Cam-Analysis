@@ -113,6 +113,8 @@ export async function GET(req: Request) {
       and p.channel_no = ch.channel_no
       ${detailsDayJoinCondition}
      where ${detailsZoneCondition}
+       and not (coalesce(ch.name, '') ~* '(face|fece)'
+             or coalesce(c.name, '') ~* 'face')
      group by c.ip, c.name, ch.channel_no, ch.name
      order by coalesce(c.name, c.ip), ch.channel_no`,
     detailsParams
