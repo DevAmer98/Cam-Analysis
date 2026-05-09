@@ -7,6 +7,7 @@ import Image from "next/image";
 import { LineChart } from "../components/LineChart";
 import { PieChart } from "../components/PieChart";
 import { BarChart } from "../components/BarChart";
+import { UserManagement } from "../components/UserManagement";
 import logoNoir from "../assets/image-removebg-preview (1).png";
 import logoFooter from "../assets/image-removebg-preview (2).png";
 
@@ -1973,6 +1974,9 @@ export default function Home() {
           )}
 
 
+        {isAdmin && session && (
+          <UserManagement currentUser={session.username} />
+        )}
         </div>
       </section>
 
