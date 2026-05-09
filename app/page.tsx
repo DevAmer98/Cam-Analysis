@@ -935,7 +935,7 @@ export default function Home() {
   };
 
   const handleDownloadReport = async () => {
-    if (!isAdmin || reportLoading) return;
+    if (!session || reportLoading) return;
     if (reportScope === "zone" && !selectedZone) {
       setReportError("Select a zone first, or switch report scope to all devices.");
       return;
@@ -992,6 +992,7 @@ export default function Home() {
         const data = (await res.json()) as { ok: boolean; user: SessionUser };
         if (isMounted && data.ok) {
           setSession(data.user);
+          if (data.user.role !== "admin") setReportScope("zone");
         }
       } catch {
         if (isMounted) router.replace("/login");
@@ -1139,14 +1140,14 @@ export default function Home() {
           </div>
         </div>
         <div className="topbar-actions">
-          {isAdmin && (
+          {session && (
             <>
               <select
                 className="pill small-pill ghost"
                 value={reportScope}
                 onChange={(event) => setReportScope(event.target.value as "all" | "zone")}
               >
-                <option value="all">All devices report</option>
+                {isAdmin && <option value="all">All devices report</option>}
                 <option value="zone">Selected zone report</option>
               </select>
               <select

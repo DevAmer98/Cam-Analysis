@@ -20,9 +20,6 @@ export async function GET(req: Request) {
   if (!session) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }
-  if (session.role !== "admin") {
-    return NextResponse.json({ ok: false, error: "Admin access required." }, { status: 403 });
-  }
 
   const url = new URL(req.url);
   const day = url.searchParams.get("day")?.trim() || "";
