@@ -27,10 +27,15 @@ export default function LoginPage() {
     }
     setIsLoading(true);
     try {
+      const encoded = new TextEncoder().encode(password);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+      const passwordHash = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password })
+        body: JSON.stringify({ username: username.trim(), passwordHash })
       });
       const contentType = res.headers.get("content-type") || "";
       const data = contentType.includes("application/json")

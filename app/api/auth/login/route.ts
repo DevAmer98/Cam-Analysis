@@ -9,7 +9,7 @@ import {
 
 type LoginPayload = {
   username?: string;
-  password?: string;
+  passwordHash?: string;
 };
 
 export async function POST(req: Request) {
@@ -20,9 +20,9 @@ export async function POST(req: Request) {
     : requestUrl.protocol === "https:";
   const payload = (await req.json().catch(() => ({}))) as LoginPayload;
   const username = typeof payload.username === "string" ? payload.username.trim() : "";
-  const password = typeof payload.password === "string" ? payload.password : "";
+  const passwordHash = typeof payload.passwordHash === "string" ? payload.passwordHash : "";
 
-  if (!username || !password) {
+  if (!username || !passwordHash) {
     return NextResponse.json({ ok: false, error: "Missing credentials." }, { status: 400 });
   }
 
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!user || !verifyPassword(password, user.password_hash)) {
+  if (!user || !verifyPassword(passwordHash, user.password_hash)) {
     return NextResponse.json({ ok: false, error: "Invalid credentials." }, { status: 401 });
   }
 
