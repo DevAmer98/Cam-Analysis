@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { sha256hex } from "../../lib/sha256";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,11 +28,7 @@ export default function LoginPage() {
     }
     setIsLoading(true);
     try {
-      const encoded = new TextEncoder().encode(password);
-      const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
-      const passwordHash = Array.from(new Uint8Array(hashBuffer))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+      const passwordHash = sha256hex(password);
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
